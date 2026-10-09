@@ -19,7 +19,7 @@ cfg = None
 async def post_init(app):
     client = httpx.AsyncClient()
     h = cfg.hosts()
-    providers = [Provider("groq", f"{h['groq']}/openai/v1", cfg.groq_key, cfg.groq_model)]
+    providers = [Provider(f"cloudflare {m.split('/')[-1]}", f"{h['ai']}/v1", "-", m) for m in cfg.cf_models]
     if cfg.openrouter_key:
         providers.append(Provider("openrouter", f"{h['or']}/api/v1", cfg.openrouter_key, cfg.openrouter_model))
     llm = LLMRouter(client, providers)
@@ -91,8 +91,7 @@ async def on_voice(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     d = ctx.application.bot_data
     try:
         f = await update.message.voice.get_file()
-        text = await transcribe(d["client"], cfg.groq_key, cfg.stt_model, bytes(await f.download_as_bytearray()),
-                                 base=cfg.hosts()["groq"])
+        text = await transcribe(d["client"], cfg.hosts()["ai"], bytes(await f.download_as_bytearray()))
     except Exception as e:  # noqa: BLE001
         log.exception("stt failed")
         await update.message.reply_text(f"⚠️ Не удалось распознать голос: {e}")

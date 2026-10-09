@@ -241,13 +241,26 @@ def test_bot_module_imports():
     import app.bot  # noqa: F401
 
 
-def test_hosts_direct_and_via_proxy():
+def test_hosts_via_proxy_and_openrouter_override():
     from app.config import Config
-    base = dict(bot_token="t", owner_id=1, groq_key="g", openrouter_key="o", wb_token="w",
-                groq_model="m", stt_model="s", openrouter_model="", tts_voice="v")
-    assert Config(**base).hosts()["tg"] == "https://api.telegram.org"
-    h = Config(**base, proxy_base="https://x.workers.dev/SEC/").hosts()
-    assert h == {"tg": "https://x.workers.dev/SEC/tg", "groq": "https://x.workers.dev/SEC/groq", "or": "https://x.workers.dev/SEC/or"}
+    base = dict(bot_token="t", owner_id=1, proxy_base="https://x.workers.dev/SEC/", wb_token="w",
+                openrouter_key="o", cf_models=("m",), openrouter_model="", tts_voice="v")
+    h = Config(**base).hosts()
+    assert h == {"tg": "https://x.workers.dev/SEC/tg", "ai": "https://x.workers.dev/SEC/ai", "or": "https://x.workers.dev/SEC/or"}
+    assert Config(**base, openrouter_base="https://openrouter.ai/").hosts()["or"] == "https://openrouter.ai"
+
+
+def test_transcribe_posts_audio_to_worker():
+    from app.voice import transcribe
+
+    def handler(req):
+        assert req.url.path == "/SEC/ai/stt" and req.content == b"OGG"
+        return httpx.Response(200, json={"text": " покажи остатки "})
+
+    async def go():
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        assert await transcribe(client, "https://x.workers.dev/SEC/ai", b"OGG") == "покажи остатки"
+    run(go())
 
 
 def test_shutdown_without_client_does_not_crash():

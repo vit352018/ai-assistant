@@ -1,17 +1,12 @@
 import re
 
 
-async def transcribe(client, groq_key, model, audio, filename="voice.ogg", base="https://api.groq.com"):
-    """Голос -> текст через Groq Whisper (бесплатно). Telegram-голосовые уже в формате ogg."""
-    r = await client.post(
-        f"{base}/openai/v1/audio/transcriptions",
-        headers={"Authorization": f"Bearer {groq_key}"},
-        files={"file": (filename, audio, "audio/ogg")},
-        data={"model": model, "language": "ru", "response_format": "text"},
-        timeout=60,
-    )
+async def transcribe(client, ai_base, audio):
+    """Голос -> текст: отправляем запись в свой Worker, он распознаёт её Whisper'ом (Workers AI)."""
+    r = await client.post(f"{ai_base}/stt", content=audio,
+                          headers={"Content-Type": "application/octet-stream"}, timeout=90)
     r.raise_for_status()
-    return r.text.strip()
+    return (r.json().get("text") or "").strip()
 
 
 def clean_for_speech(text, limit=900):

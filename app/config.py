@@ -1,26 +1,25 @@
 import os
 from dataclasses import dataclass
 
+# Модели Workers AI по порядку: если у первой кончился дневной лимит, берём следующую.
+DEFAULT_CF_MODELS = "@cf/meta/llama-3.3-70b-instruct-fp8-fast,@cf/meta/llama-3.1-8b-instruct"
+
 
 @dataclass(frozen=True)
 class Config:
     bot_token: str
     owner_id: int
-    groq_key: str
-    openrouter_key: str
+    proxy_base: str  # адрес своего Cloudflare Worker вместе с секретом
     wb_token: str
-    groq_model: str
-    stt_model: str
+    openrouter_key: str
+    cf_models: tuple
     openrouter_model: str
     tts_voice: str
-    proxy_base: str = ""
+    openrouter_base: str = ""  # необязательно: ходить в OpenRouter напрямую, минуя Worker
 
     def hosts(self):
-        """Куда ходить за границу: напрямую или через свой Cloudflare Worker (PROXY_BASE)."""
         p = self.proxy_base.rstrip("/")
-        if not p:
-            return {"tg": "https://api.telegram.org", "groq": "https://api.groq.com", "or": "https://openrouter.ai"}
-        return {"tg": p + "/tg", "groq": p + "/groq", "or": p + "/or"}
+        return {"tg": p + "/tg", "ai": p + "/ai", "or": self.openrouter_base.rstrip("/") or p + "/or"}
 
 
 def _need(name):
@@ -31,15 +30,15 @@ def _need(name):
 
 
 def load():
+    models = os.environ.get("CF_MODELS", DEFAULT_CF_MODELS)
     return Config(
         bot_token=_need("TELEGRAM_BOT_TOKEN"),
         owner_id=int(_need("OWNER_ID")),
-        groq_key=_need("GROQ_API_KEY"),
-        openrouter_key=os.environ.get("OPENROUTER_API_KEY", "").strip(),
+        proxy_base=_need("PROXY_BASE"),
         wb_token=os.environ.get("WB_TOKEN", "").strip(),
-        groq_model=os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile").strip(),
-        stt_model=os.environ.get("GROQ_STT_MODEL", "whisper-large-v3-turbo").strip(),
+        openrouter_key=os.environ.get("OPENROUTER_API_KEY", "").strip(),
+        cf_models=tuple(m.strip() for m in models.split(",") if m.strip()),
         openrouter_model=os.environ.get("OPENROUTER_MODEL", "").strip(),
         tts_voice=os.environ.get("TTS_VOICE", "ru-RU-DmitryNeural").strip(),
-        proxy_base=os.environ.get("PROXY_BASE", "").strip(),
+        openrouter_base=os.environ.get("OPENROUTER_BASE", "").strip(),
     )
