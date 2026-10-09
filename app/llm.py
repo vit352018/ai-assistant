@@ -23,8 +23,8 @@ class Provider:
         self.pause_until = 0.0
 
 
-async def pick_free_model(client):
-    r = await client.get("https://openrouter.ai/api/v1/models", timeout=30)
+async def pick_free_model(client, base_url):
+    r = await client.get(f"{base_url}/models", timeout=30)
     r.raise_for_status()
     free = [
         m["id"]
@@ -68,7 +68,7 @@ class LLMRouter:
 
     async def _call(self, p, messages, max_tokens, temperature):
         if not p.model:
-            p.model = await pick_free_model(self.client)
+            p.model = await pick_free_model(self.client, p.base_url)
             if not p.model:
                 raise LLMError("бесплатных моделей не найдено")
         r = await self.client.post(

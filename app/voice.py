@@ -1,10 +1,10 @@
 import re
 
 
-async def transcribe(client, groq_key, model, audio, filename="voice.ogg"):
+async def transcribe(client, groq_key, model, audio, filename="voice.ogg", base="https://api.groq.com"):
     """Голос -> текст через Groq Whisper (бесплатно). Telegram-голосовые уже в формате ogg."""
     r = await client.post(
-        "https://api.groq.com/openai/v1/audio/transcriptions",
+        f"{base}/openai/v1/audio/transcriptions",
         headers={"Authorization": f"Bearer {groq_key}"},
         files={"file": (filename, audio, "audio/ogg")},
         data={"model": model, "language": "ru", "response_format": "text"},

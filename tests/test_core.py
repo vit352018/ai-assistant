@@ -239,3 +239,18 @@ def test_wb_agent_tools_end_to_end_with_fake_api():
 
 def test_bot_module_imports():
     import app.bot  # noqa: F401
+
+
+def test_hosts_direct_and_via_proxy():
+    from app.config import Config
+    base = dict(bot_token="t", owner_id=1, groq_key="g", openrouter_key="o", wb_token="w",
+                groq_model="m", stt_model="s", openrouter_model="", tts_voice="v")
+    assert Config(**base).hosts()["tg"] == "https://api.telegram.org"
+    h = Config(**base, proxy_base="https://x.workers.dev/SEC/").hosts()
+    assert h == {"tg": "https://x.workers.dev/SEC/tg", "groq": "https://x.workers.dev/SEC/groq", "or": "https://x.workers.dev/SEC/or"}
+
+
+def test_shutdown_without_client_does_not_crash():
+    import types
+    from app.bot import post_shutdown
+    run(post_shutdown(types.SimpleNamespace(bot_data={})))

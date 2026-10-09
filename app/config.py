@@ -13,6 +13,14 @@ class Config:
     stt_model: str
     openrouter_model: str
     tts_voice: str
+    proxy_base: str = ""
+
+    def hosts(self):
+        """Куда ходить за границу: напрямую или через свой Cloudflare Worker (PROXY_BASE)."""
+        p = self.proxy_base.rstrip("/")
+        if not p:
+            return {"tg": "https://api.telegram.org", "groq": "https://api.groq.com", "or": "https://openrouter.ai"}
+        return {"tg": p + "/tg", "groq": p + "/groq", "or": p + "/or"}
 
 
 def _need(name):
@@ -33,4 +41,5 @@ def load():
         stt_model=os.environ.get("GROQ_STT_MODEL", "whisper-large-v3-turbo").strip(),
         openrouter_model=os.environ.get("OPENROUTER_MODEL", "").strip(),
         tts_voice=os.environ.get("TTS_VOICE", "ru-RU-DmitryNeural").strip(),
+        proxy_base=os.environ.get("PROXY_BASE", "").strip(),
     )

@@ -18,9 +18,10 @@ cfg = None
 
 async def post_init(app):
     client = httpx.AsyncClient()
-    providers = [Provider("groq", "https://api.groq.com/openai/v1", cfg.groq_key, cfg.groq_model)]
+    h = cfg.hosts()
+    providers = [Provider("groq", f"{h['groq']}/openai/v1", cfg.groq_key, cfg.groq_model)]
     if cfg.openrouter_key:
-        providers.append(Provider("openrouter", "https://openrouter.ai/api/v1", cfg.openrouter_key, cfg.openrouter_model))
+        providers.append(Provider("openrouter", f"{h['or']}/api/v1", cfg.openrouter_key, cfg.openrouter_model))
     llm = LLMRouter(client, providers)
     wb = WB(client, cfg.wb_token)
     app.bot_data.update(client=client, llm=llm, wb=wb, always_voice=False,
@@ -28,7 +29,9 @@ async def post_init(app):
 
 
 async def post_shutdown(app):
-    await app.bot_data["client"].aclose()
+    client = app.bot_data.get("client")  # его нет, если бот не смог даже запуститься
+    if client:
+        await client.aclose()
 
 
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -88,7 +91,8 @@ async def on_voice(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     d = ctx.application.bot_data
     try:
         f = await update.message.voice.get_file()
-        text = await transcribe(d["client"], cfg.groq_key, cfg.stt_model, bytes(await f.download_as_bytearray()))
+        text = await transcribe(d["client"], cfg.groq_key, cfg.stt_model, bytes(await f.download_as_bytearray()),
+                                 base=cfg.hosts()["groq"])
     except Exception as e:  # noqa: BLE001
         log.exception("stt failed")
         await update.message.reply_text(f"⚠️ Не удалось распознать голос: {e}")
@@ -111,7 +115,10 @@ def main():
         logging.getLogger(noisy).setLevel(logging.WARNING)
     cfg = load()
     owner = filters.User(user_id=cfg.owner_id)  # всем остальным бот не отвечает
-    app = Application.builder().token(cfg.bot_token).post_init(post_init).post_shutdown(post_shutdown).build()
+    tg = cfg.hosts()["tg"]
+    app = (Application.builder().token(cfg.bot_token)
+           .base_url(f"{tg}/bot").base_file_url(f"{tg}/file/bot")
+           .post_init(post_init).post_shutdown(post_shutdown).build())
     app.add_handler(CommandHandler("start", start, filters=owner))
     app.add_handler(CommandHandler("check", check, filters=owner))
     app.add_handler(CommandHandler("voice", voice_toggle, filters=owner))
