@@ -2,7 +2,7 @@ import os
 from dataclasses import dataclass
 
 # Модели Workers AI по порядку: если у первой кончился дневной лимит, берём следующую.
-DEFAULT_CF_MODELS = "@cf/meta/llama-3.3-70b-instruct-fp8-fast,@cf/meta/llama-3.1-8b-instruct"
+DEFAULT_CF_MODELS = "@cf/meta/llama-3.3-70b-instruct-fp8-fast,@cf/meta/llama-3.1-8b-instruct-fast"
 
 
 @dataclass(frozen=True)
