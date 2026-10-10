@@ -70,8 +70,10 @@ async def check(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def respond(update: Update, ctx: ContextTypes.DEFAULT_TYPE, text, voice_in):
     d = ctx.application.bot_data
     await ctx.bot.send_chat_action(update.effective_chat.id, "typing")
+    spoken = ""  # то, что озвучим: без пометки о модели
     try:
-        answer = await d["orch"].handle(text)
+        answer = spoken = await d["orch"].handle(text)
+        answer += f"\n\n— ответила модель: {d['llm'].last_model}"
     except LLMError as e:
         answer = f"⚠️ Все бесплатные модели сейчас недоступны (обычно это лимиты). Попробуйте через минуту.\n{e}"
     except Exception as e:  # noqa: BLE001
@@ -81,7 +83,7 @@ async def respond(update: Update, ctx: ContextTypes.DEFAULT_TYPE, text, voice_in
         await update.message.reply_text(part)
     if voice_in or d["always_voice"]:
         try:
-            audio = await synthesize(answer, cfg.tts_voice)
+            audio = await synthesize(spoken, cfg.tts_voice)
             if audio:
                 await update.message.reply_voice(audio)
         except Exception:  # noqa: BLE001 — текст уже отправлен, голос не критичен

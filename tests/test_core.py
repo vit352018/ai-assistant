@@ -289,3 +289,16 @@ def test_provider_without_key_sends_no_auth_header():
         r = LLMRouter(client, [Provider("llm7", "https://x.test/v1", "", "gpt-4o-mini")])
         assert await r.chat([{"role": "user", "content": "x"}]) == "ок"
     run(go())
+
+
+def test_router_remembers_which_model_answered():
+    def handler(req):
+        if req.url.host == "p0.test":
+            return httpx.Response(429, headers={"retry-after": "30"})
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ок"}}]})
+
+    async def go():
+        r, _ = make_router(handler)
+        await r.chat([{"role": "user", "content": "x"}])
+        return r.last_model
+    assert run(go()) == "p1"

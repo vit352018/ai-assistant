@@ -42,6 +42,7 @@ class LLMRouter:
     def __init__(self, client, providers):
         self.client = client
         self.providers = providers
+        self.last_model = ""  # какая модель ответила на последний запрос
 
     async def chat(self, messages, max_tokens=1500, temperature=0.2):
         import asyncio
@@ -53,7 +54,9 @@ class LLMRouter:
                     errors.append(f"{p.name}: занят, пауза")
                     continue
                 try:
-                    return await self._call(p, messages, max_tokens, temperature)
+                    text = await self._call(p, messages, max_tokens, temperature)
+                    self.last_model = p.name
+                    return text
                 except Exception as e:  # noqa: BLE001 — любая ошибка = пробуем следующего
                     errors.append(f"{p.name}: {e}")
                     log.warning("LLM %s: %s", p.name, e)
