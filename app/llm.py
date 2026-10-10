@@ -69,7 +69,7 @@ class LLMRouter:
             f"{p.base_url}/chat/completions",
             headers={"Authorization": f"Bearer {p.key}"} if p.key else {},
             json={"model": p.model, "messages": messages, "temperature": temperature, "max_tokens": max_tokens},
-            timeout=60,
+            timeout=40,
         )
         if r.status_code == 429:
             p.pause_until = time.time() + _retry_after(r)
@@ -77,6 +77,8 @@ class LLMRouter:
         if r.status_code in (401, 403):
             p.pause_until = time.time() + 600
         if r.status_code >= 400:
+            if r.status_code in (400, 404) and "model" in r.text.lower():
+                p.pause_until = time.time() + 3600  # модели нет или она закрыта — не дёргаем её час
             raise LLMError(f"HTTP {r.status_code}: {r.text[:150]}")
         text = _text(r.json()["choices"][0]["message"].get("content"))
         if not text:

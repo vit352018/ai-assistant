@@ -233,6 +233,8 @@ def test_hosts_via_proxy():
     assert h["mistral"] == "https://x.workers.dev/SEC/mistral"
     assert h["llm7"] == "https://x.workers.dev/SEC/llm7"
     assert h["cohere"] == "https://x.workers.dev/SEC/cohere"
+    from app.config import COHERE_MODELS
+    assert len(COHERE_MODELS) >= 1
 
 
 def test_transcribe_posts_audio_to_worker():
