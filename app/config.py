@@ -5,7 +5,7 @@ from dataclasses import dataclass
 # Порядок = приоритет. Все модели Cloudflare делят один дневной лимит аккаунта.
 DEFAULT_CF_MODELS = (
     "@cf/meta/llama-3.3-70b-instruct-fp8-fast,@cf/openai/gpt-oss-120b,"
-    "@cf/google/gemma-4-26b-a4b-it,@cf/zai-org/glm-4.7-flash,@cf/meta/llama-3.1-8b-instruct-fast"
+    "@cf/google/gemma-4-26b-a4b-it,@cf/meta/llama-3.1-8b-instruct-fast"
 )
 COHERE_MODELS = ("command-a-03-2025", "command-r7b-12-2024")
 LLM7_MODELS = (
