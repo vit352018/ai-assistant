@@ -46,6 +46,17 @@ def _retry_after(r):
         return 60
 
 
+def _text(content):
+    """Ответ модели бывает строкой или списком частей. Остальное — ошибка провайдера."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        return "".join(p.get("text", "") if isinstance(p, dict) else str(p) for p in content).strip()
+    raise LLMError(f"неожиданный формат ответа: {type(content).__name__}")
+
+
 class LLMRouter:
     """Пробует провайдеров по очереди: если один упёрся в лимит или упал — берёт следующий."""
 
@@ -54,16 +65,24 @@ class LLMRouter:
         self.providers = providers
 
     async def chat(self, messages, max_tokens=1500, temperature=0.2):
+        import asyncio
         errors = []
-        for p in self.providers:
-            if time.time() < p.pause_until:
-                errors.append(f"{p.name}: на паузе из-за лимита")
-                continue
-            try:
-                return await self._call(p, messages, max_tokens, temperature)
-            except Exception as e:  # noqa: BLE001 — любая ошибка = пробуем следующего
-                errors.append(f"{p.name}: {e}")
-                log.warning("LLM %s: %s", p.name, e)
+        for attempt in range(2):  # второй круг — если все провайдеры лишь временно заняты
+            errors = []
+            for p in self.providers:
+                if time.time() < p.pause_until:
+                    errors.append(f"{p.name}: занят, пауза")
+                    continue
+                try:
+                    return await self._call(p, messages, max_tokens, temperature)
+                except Exception as e:  # noqa: BLE001 — любая ошибка = пробуем следующего
+                    errors.append(f"{p.name}: {e}")
+                    log.warning("LLM %s: %s", p.name, e)
+            waits = [p.pause_until - time.time() for p in self.providers if p.pause_until > time.time()]
+            if attempt == 0 and waits:
+                await asyncio.sleep(min(max(min(waits), 1), 12))
+            elif attempt == 0:
+                await asyncio.sleep(2)
         raise LLMError("; ".join(errors))
 
     async def _call(self, p, messages, max_tokens, temperature):
@@ -86,7 +105,7 @@ class LLMRouter:
             if p.auto:
                 p.model = ""  # выбранная модель пропала — в следующий раз выберем заново
             raise LLMError(f"HTTP {r.status_code}: {r.text[:150]}")
-        text = (r.json()["choices"][0]["message"].get("content") or "").strip()
+        text = _text(r.json()["choices"][0]["message"].get("content"))
         if not text:
             raise LLMError("пустой ответ")
         return text

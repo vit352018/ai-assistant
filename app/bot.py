@@ -20,6 +20,10 @@ async def post_init(app):
     client = httpx.AsyncClient()
     h = cfg.hosts()
     providers = [Provider(f"cloudflare {m.split('/')[-1]}", f"{h['ai']}/v1", "-", m) for m in cfg.cf_models]
+    if cfg.mistral_key:
+        providers.append(Provider("mistral", f"{h['mistral']}/v1", cfg.mistral_key, cfg.mistral_model))
+    if cfg.sambanova_key:
+        providers.append(Provider("sambanova", f"{h['sambanova']}/v1", cfg.sambanova_key, cfg.sambanova_model))
     if cfg.openrouter_key:
         providers.append(Provider("openrouter", f"{h['or']}/api/v1", cfg.openrouter_key, cfg.openrouter_model))
     llm = LLMRouter(client, providers)

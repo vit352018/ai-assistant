@@ -1,12 +1,21 @@
 import re
 
 
-async def transcribe(client, ai_base, audio):
-    """Голос -> текст: отправляем запись в свой Worker, он распознаёт её Whisper'ом (Workers AI)."""
-    r = await client.post(f"{ai_base}/stt", content=audio,
-                          headers={"Content-Type": "application/octet-stream"}, timeout=90)
-    r.raise_for_status()
-    return (r.json().get("text") or "").strip()
+async def transcribe(client, ai_base, audio, tries=3):
+    """Голос -> текст: запись уходит в свой Worker, он распознаёт её Whisper'ом (Workers AI).
+    При перегрузке повторяем с паузой."""
+    import asyncio
+    last = ""
+    for i in range(tries):
+        r = await client.post(f"{ai_base}/stt", content=audio,
+                              headers={"Content-Type": "application/octet-stream"}, timeout=90)
+        if r.status_code == 200:
+            return (r.json().get("text") or "").strip()
+        last = f"HTTP {r.status_code}: {r.text[:120]}"
+        if r.status_code not in (429, 502, 503, 504):
+            break
+        await asyncio.sleep(2 * (i + 1))
+    raise RuntimeError(last)
 
 
 def clean_for_speech(text, limit=900):

@@ -246,8 +246,9 @@ def test_hosts_via_proxy_and_openrouter_override():
     base = dict(bot_token="t", owner_id=1, proxy_base="https://x.workers.dev/SEC/", wb_token="w",
                 openrouter_key="o", cf_models=("m",), openrouter_model="", tts_voice="v")
     h = Config(**base).hosts()
-    assert h == {"tg": "https://x.workers.dev/SEC/tg", "ai": "https://x.workers.dev/SEC/ai", "or": "https://x.workers.dev/SEC/or"}
+    assert h["tg"] == "https://x.workers.dev/SEC/tg" and h["ai"] == "https://x.workers.dev/SEC/ai" and h["or"] == "https://x.workers.dev/SEC/or"
     assert Config(**base, openrouter_base="https://openrouter.ai/").hosts()["or"] == "https://openrouter.ai"
+    assert h["mistral"] == "https://x.workers.dev/SEC/mistral"
 
 
 def test_transcribe_posts_audio_to_worker():
@@ -267,3 +268,26 @@ def test_shutdown_without_client_does_not_crash():
     import types
     from app.bot import post_shutdown
     run(post_shutdown(types.SimpleNamespace(bot_data={})))
+
+
+def test_content_as_list_and_bad_format():
+    from app.llm import _text, LLMError
+    assert _text([{"type": "text", "text": "при"}, {"type": "text", "text": "вет"}]) == "привет"
+    assert _text("  ок ") == "ок"
+    with pytest.raises(LLMError):
+        _text({"unexpected": "dict"})
+
+
+def test_router_retries_after_short_busy_pause():
+    state = {"n": 0}
+
+    def handler(req):
+        state["n"] += 1
+        if state["n"] == 1:
+            return httpx.Response(429, headers={"retry-after": "1"})
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ок"}}]})
+
+    async def go():
+        r, _ = make_router(handler, n=1)
+        return await r.chat([{"role": "user", "content": "x"}])
+    assert run(go()) == "ок"

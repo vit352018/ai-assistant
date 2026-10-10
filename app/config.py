@@ -16,10 +16,15 @@ class Config:
     openrouter_model: str
     tts_voice: str
     openrouter_base: str = ""  # необязательно: ходить в OpenRouter напрямую, минуя Worker
+    mistral_key: str = ""
+    mistral_model: str = "mistral-small-latest"
+    sambanova_key: str = ""
+    sambanova_model: str = "Meta-Llama-3.3-70B-Instruct"
 
     def hosts(self):
         p = self.proxy_base.rstrip("/")
-        return {"tg": p + "/tg", "ai": p + "/ai", "or": self.openrouter_base.rstrip("/") or p + "/or"}
+        return {"tg": p + "/tg", "ai": p + "/ai", "or": self.openrouter_base.rstrip("/") or p + "/or",
+                "mistral": p + "/mistral", "sambanova": p + "/sambanova"}
 
 
 def _need(name):
@@ -41,4 +46,8 @@ def load():
         openrouter_model=os.environ.get("OPENROUTER_MODEL", "").strip(),
         tts_voice=os.environ.get("TTS_VOICE", "ru-RU-DmitryNeural").strip(),
         openrouter_base=os.environ.get("OPENROUTER_BASE", "").strip(),
+        mistral_key=os.environ.get("MISTRAL_API_KEY", "").strip(),
+        mistral_model=os.environ.get("MISTRAL_MODEL", "mistral-small-latest").strip(),
+        sambanova_key=os.environ.get("SAMBANOVA_API_KEY", "").strip(),
+        sambanova_model=os.environ.get("SAMBANOVA_MODEL", "Meta-Llama-3.3-70B-Instruct").strip(),
     )
