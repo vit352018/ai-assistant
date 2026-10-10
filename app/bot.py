@@ -24,7 +24,6 @@ async def post_init(app):
     providers = [Provider(f"cf {m.split('/')[-1]}", f"{h['ai']}/v1", "-", m) for m in cfg.cf_models]
     if cfg.cohere_key:
         providers += [Provider(f"cohere {m}", f"{h['cohere']}/compatibility/v1", cfg.cohere_key, m) for m in cfg.cohere_models]
-    providers += [Provider(f"llm7 {m}", f"{h['llm7']}/v1", cfg.llm7_key, m) for m in cfg.llm7_models]
     if cfg.mistral_key:
         providers.append(Provider("mistral", f"{h['mistral']}/v1", cfg.mistral_key, cfg.mistral_model))
     if cfg.sambanova_key:

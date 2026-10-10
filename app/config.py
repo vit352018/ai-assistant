@@ -8,11 +8,6 @@ DEFAULT_CF_MODELS = (
     "@cf/google/gemma-4-26b-a4b-it,@cf/meta/llama-3.1-8b-instruct-fast"
 )
 COHERE_MODELS = ("command-a-03-2025", "command-r7b-12-2024")
-# У LLM7 бесплатные только модели уровня "turbo"; "pro" требуют баланс (проверено списком /v1/models).
-LLM7_MODELS = (
-    "DeepSeek-V4-Flash-0731", "GLM-5.3-Flash", "gemma4:31b", "gpt-oss:20b",
-    "mistral-Nemo-Instruct-2407", "nemotron-3-nano:30b",
-)
 
 
 @dataclass(frozen=True)
@@ -26,8 +21,6 @@ class Config:
     browser_enabled: bool = True
     cohere_key: str = ""
     cohere_models: tuple = COHERE_MODELS
-    llm7_models: tuple = tuple(LLM7_MODELS)
-    llm7_key: str = ""  # необязательно: без ключа LLM7 работает с базовым лимитом
     mistral_key: str = ""
     mistral_model: str = "mistral-small-latest"
     sambanova_key: str = ""
@@ -36,7 +29,7 @@ class Config:
     def hosts(self):
         p = self.proxy_base.rstrip("/")
         return {"tg": p + "/tg", "ai": p + "/ai",
-                "mistral": p + "/mistral", "sambanova": p + "/sambanova", "llm7": p + "/llm7", "cohere": p + "/cohere"}
+                "mistral": p + "/mistral", "sambanova": p + "/sambanova", "cohere": p + "/cohere"}
 
 
 def _need(name):
@@ -57,7 +50,6 @@ def load():
         tts_voice=os.environ.get("TTS_VOICE", "ru-RU-DmitryNeural").strip(),
         browser_enabled=os.environ.get("BROWSER", "1").strip() != "0",
         cohere_key=os.environ.get("COHERE_API_KEY", "").strip(),
-        llm7_key=os.environ.get("LLM7_API_KEY", "").strip(),
         mistral_key=os.environ.get("MISTRAL_API_KEY", "").strip(),
         mistral_model=os.environ.get("MISTRAL_MODEL", "mistral-small-latest").strip(),
         sambanova_key=os.environ.get("SAMBANOVA_API_KEY", "").strip(),
