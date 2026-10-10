@@ -20,6 +20,8 @@ async def post_init(app):
     client = httpx.AsyncClient()
     h = cfg.hosts()
     providers = [Provider(f"cloudflare {m.split('/')[-1]}", f"{h['ai']}/v1", "-", m) for m in cfg.cf_models]
+    if cfg.cohere_key:
+        providers.append(Provider("cohere", f"{h['cohere']}/compatibility/v1", cfg.cohere_key, cfg.cohere_model))
     providers.append(Provider("llm7", f"{h['llm7']}/v1", cfg.llm7_key, cfg.llm7_model))
     if cfg.mistral_key:
         providers.append(Provider("mistral", f"{h['mistral']}/v1", cfg.mistral_key, cfg.mistral_model))

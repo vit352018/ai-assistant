@@ -9,6 +9,7 @@ const TARGETS = {
   mistral: "https://api.mistral.ai",
   sambanova: "https://api.sambanova.ai",
   llm7: "https://api.llm7.io",
+  cohere: "https://api.cohere.com",
 };
 
 const json = (obj, status = 200, headers = {}) =>

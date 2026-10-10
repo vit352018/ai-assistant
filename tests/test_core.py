@@ -250,6 +250,7 @@ def test_hosts_via_proxy_and_openrouter_override():
     assert Config(**base, openrouter_base="https://openrouter.ai/").hosts()["or"] == "https://openrouter.ai"
     assert h["mistral"] == "https://x.workers.dev/SEC/mistral"
     assert h["llm7"] == "https://x.workers.dev/SEC/llm7"
+    assert h["cohere"] == "https://x.workers.dev/SEC/cohere"
 
 
 def test_transcribe_posts_audio_to_worker():
