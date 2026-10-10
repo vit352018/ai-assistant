@@ -68,23 +68,6 @@ def test_router_all_fail():
     run(go())
 
 
-def test_router_auto_picks_free_openrouter_model():
-    def handler(req):
-        if req.url.path.endswith("/models"):
-            return httpx.Response(200, json={"data": [
-                {"id": "paid/model", "pricing": {"prompt": "0.1", "completion": "0.2"}},
-                {"id": "meta-llama/llama-3.3-70b-instruct:free", "pricing": {"prompt": "0", "completion": "0"}},
-            ]})
-        assert req.content and b"llama-3.3-70b-instruct:free" in req.content
-        return httpx.Response(200, json={"choices": [{"message": {"content": "ок"}}]})
-
-    async def go():
-        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-        r = LLMRouter(client, [Provider("openrouter", "https://openrouter.ai/api/v1", "k", "")])
-        assert await r.chat([{"role": "user", "content": "x"}]) == "ок"
-    run(go())
-
-
 # ---------- цикл агента и оркестратор ----------
 class FakeLLM:
     def __init__(self, replies):
@@ -241,13 +224,12 @@ def test_bot_module_imports():
     import app.bot  # noqa: F401
 
 
-def test_hosts_via_proxy_and_openrouter_override():
+def test_hosts_via_proxy():
     from app.config import Config
     base = dict(bot_token="t", owner_id=1, proxy_base="https://x.workers.dev/SEC/", wb_token="w",
-                openrouter_key="o", cf_models=("m",), openrouter_model="", tts_voice="v")
+                cf_models=("m",), tts_voice="v")
     h = Config(**base).hosts()
-    assert h["tg"] == "https://x.workers.dev/SEC/tg" and h["ai"] == "https://x.workers.dev/SEC/ai" and h["or"] == "https://x.workers.dev/SEC/or"
-    assert Config(**base, openrouter_base="https://openrouter.ai/").hosts()["or"] == "https://openrouter.ai"
+    assert h["tg"] == "https://x.workers.dev/SEC/tg" and h["ai"] == "https://x.workers.dev/SEC/ai"
     assert h["mistral"] == "https://x.workers.dev/SEC/mistral"
     assert h["llm7"] == "https://x.workers.dev/SEC/llm7"
     assert h["cohere"] == "https://x.workers.dev/SEC/cohere"

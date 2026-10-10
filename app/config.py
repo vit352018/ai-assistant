@@ -11,14 +11,11 @@ class Config:
     owner_id: int
     proxy_base: str  # адрес своего Cloudflare Worker вместе с секретом
     wb_token: str
-    openrouter_key: str
     cf_models: tuple
-    openrouter_model: str
     tts_voice: str
-    openrouter_base: str = ""  # необязательно: ходить в OpenRouter напрямую, минуя Worker
     cohere_key: str = ""
     cohere_model: str = "command-a-03-2025"
-    llm7_model: str = "gpt-4o-mini"
+    llm7_model: str = "mistral-Small-24B-Instruct-2501"
     llm7_key: str = ""  # необязательно: без ключа LLM7 работает с базовым лимитом
     mistral_key: str = ""
     mistral_model: str = "mistral-small-latest"
@@ -27,7 +24,7 @@ class Config:
 
     def hosts(self):
         p = self.proxy_base.rstrip("/")
-        return {"tg": p + "/tg", "ai": p + "/ai", "or": self.openrouter_base.rstrip("/") or p + "/or",
+        return {"tg": p + "/tg", "ai": p + "/ai",
                 "mistral": p + "/mistral", "sambanova": p + "/sambanova", "llm7": p + "/llm7", "cohere": p + "/cohere"}
 
 
@@ -45,14 +42,11 @@ def load():
         owner_id=int(_need("OWNER_ID")),
         proxy_base=_need("PROXY_BASE"),
         wb_token=os.environ.get("WB_TOKEN", "").strip(),
-        openrouter_key=os.environ.get("OPENROUTER_API_KEY", "").strip(),
         cf_models=tuple(m.strip() for m in models.split(",") if m.strip()),
-        openrouter_model=os.environ.get("OPENROUTER_MODEL", "").strip(),
         tts_voice=os.environ.get("TTS_VOICE", "ru-RU-DmitryNeural").strip(),
-        openrouter_base=os.environ.get("OPENROUTER_BASE", "").strip(),
         cohere_key=os.environ.get("COHERE_API_KEY", "").strip(),
         cohere_model=os.environ.get("COHERE_MODEL", "command-a-03-2025").strip(),
-        llm7_model=os.environ.get("LLM7_MODEL", "gpt-4o-mini").strip(),
+        llm7_model=os.environ.get("LLM7_MODEL", "mistral-Small-24B-Instruct-2501").strip(),
         llm7_key=os.environ.get("LLM7_API_KEY", "").strip(),
         mistral_key=os.environ.get("MISTRAL_API_KEY", "").strip(),
         mistral_model=os.environ.get("MISTRAL_MODEL", "mistral-small-latest").strip(),

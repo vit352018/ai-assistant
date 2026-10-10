@@ -1,11 +1,10 @@
-// Cloudflare Worker: (1) пересылает запросы к Telegram, OpenRouter, Mistral, SambaNova;
+// Cloudflare Worker: (1) пересылает запросы к Telegram, Mistral, SambaNova, LLM7, Cohere;
 // (2) даёт боту ИИ от Cloudflare (Workers AI) и распознавание речи (Whisper).
 // Адрес: https://<имя>.workers.dev/<СЕКРЕТ>/<цель>/...  Без правильного секрета отвечает 404.
 // Для /ai нужна привязка (Binding) Workers AI с именем переменной AI.
 const SECRET = "ВСТАВЬТЕ_СЕКРЕТ";
 const TARGETS = {
   tg: "https://api.telegram.org",
-  or: "https://openrouter.ai",
   mistral: "https://api.mistral.ai",
   sambanova: "https://api.sambanova.ai",
   llm7: "https://api.llm7.io",

@@ -27,8 +27,6 @@ async def post_init(app):
         providers.append(Provider("mistral", f"{h['mistral']}/v1", cfg.mistral_key, cfg.mistral_model))
     if cfg.sambanova_key:
         providers.append(Provider("sambanova", f"{h['sambanova']}/v1", cfg.sambanova_key, cfg.sambanova_model))
-    if cfg.openrouter_key:
-        providers.append(Provider("openrouter", f"{h['or']}/api/v1", cfg.openrouter_key, cfg.openrouter_model))
     llm = LLMRouter(client, providers)
     wb = WB(client, cfg.wb_token)
     app.bot_data.update(client=client, llm=llm, wb=wb, always_voice=False,
