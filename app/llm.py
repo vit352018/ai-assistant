@@ -92,7 +92,7 @@ class LLMRouter:
                 raise LLMError("бесплатных моделей не найдено")
         r = await self.client.post(
             f"{p.base_url}/chat/completions",
-            headers={"Authorization": f"Bearer {p.key}"},
+            headers={"Authorization": f"Bearer {p.key}"} if p.key else {},
             json={"model": p.model, "messages": messages, "temperature": temperature, "max_tokens": max_tokens},
             timeout=60,
         )

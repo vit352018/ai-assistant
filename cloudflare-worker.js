@@ -8,6 +8,7 @@ const TARGETS = {
   or: "https://openrouter.ai",
   mistral: "https://api.mistral.ai",
   sambanova: "https://api.sambanova.ai",
+  llm7: "https://api.llm7.io",
 };
 
 const json = (obj, status = 200, headers = {}) =>

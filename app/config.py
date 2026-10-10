@@ -16,6 +16,8 @@ class Config:
     openrouter_model: str
     tts_voice: str
     openrouter_base: str = ""  # необязательно: ходить в OpenRouter напрямую, минуя Worker
+    llm7_model: str = "gpt-4o-mini"
+    llm7_key: str = ""  # необязательно: без ключа LLM7 работает с базовым лимитом
     mistral_key: str = ""
     mistral_model: str = "mistral-small-latest"
     sambanova_key: str = ""
@@ -24,7 +26,7 @@ class Config:
     def hosts(self):
         p = self.proxy_base.rstrip("/")
         return {"tg": p + "/tg", "ai": p + "/ai", "or": self.openrouter_base.rstrip("/") or p + "/or",
-                "mistral": p + "/mistral", "sambanova": p + "/sambanova"}
+                "mistral": p + "/mistral", "sambanova": p + "/sambanova", "llm7": p + "/llm7"}
 
 
 def _need(name):
@@ -46,6 +48,8 @@ def load():
         openrouter_model=os.environ.get("OPENROUTER_MODEL", "").strip(),
         tts_voice=os.environ.get("TTS_VOICE", "ru-RU-DmitryNeural").strip(),
         openrouter_base=os.environ.get("OPENROUTER_BASE", "").strip(),
+        llm7_model=os.environ.get("LLM7_MODEL", "gpt-4o-mini").strip(),
+        llm7_key=os.environ.get("LLM7_API_KEY", "").strip(),
         mistral_key=os.environ.get("MISTRAL_API_KEY", "").strip(),
         mistral_model=os.environ.get("MISTRAL_MODEL", "mistral-small-latest").strip(),
         sambanova_key=os.environ.get("SAMBANOVA_API_KEY", "").strip(),

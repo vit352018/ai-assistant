@@ -249,6 +249,7 @@ def test_hosts_via_proxy_and_openrouter_override():
     assert h["tg"] == "https://x.workers.dev/SEC/tg" and h["ai"] == "https://x.workers.dev/SEC/ai" and h["or"] == "https://x.workers.dev/SEC/or"
     assert Config(**base, openrouter_base="https://openrouter.ai/").hosts()["or"] == "https://openrouter.ai"
     assert h["mistral"] == "https://x.workers.dev/SEC/mistral"
+    assert h["llm7"] == "https://x.workers.dev/SEC/llm7"
 
 
 def test_transcribe_posts_audio_to_worker():
@@ -291,3 +292,15 @@ def test_router_retries_after_short_busy_pause():
         r, _ = make_router(handler, n=1)
         return await r.chat([{"role": "user", "content": "x"}])
     assert run(go()) == "ок"
+
+
+def test_provider_without_key_sends_no_auth_header():
+    def handler(req):
+        assert "authorization" not in req.headers
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ок"}}]})
+
+    async def go():
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        r = LLMRouter(client, [Provider("llm7", "https://x.test/v1", "", "gpt-4o-mini")])
+        assert await r.chat([{"role": "user", "content": "x"}]) == "ок"
+    run(go())
