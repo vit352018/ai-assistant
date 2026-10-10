@@ -8,10 +8,10 @@ DEFAULT_CF_MODELS = (
     "@cf/google/gemma-4-26b-a4b-it,@cf/meta/llama-3.1-8b-instruct-fast"
 )
 COHERE_MODELS = ("command-a-03-2025", "command-r7b-12-2024")
+# У LLM7 бесплатные только модели уровня "turbo"; "pro" требуют баланс (проверено списком /v1/models).
 LLM7_MODELS = (
-    "DeepSeek-V4.1-Flash", "GLM-5.3-Flash", "mistral-Small-24B-Instruct-2501", "gpt-oss:20b",
-    "gemma4:31b", "deepseek-v4-flash:0731", "llama-4-maverick", "mistral-large-3:675b",
-    "nemotron-3-nano:30b",
+    "DeepSeek-V4-Flash-0731", "GLM-5.3-Flash", "gemma4:31b", "gpt-oss:20b",
+    "mistral-Nemo-Instruct-2407", "nemotron-3-nano:30b",
 )
 
 
