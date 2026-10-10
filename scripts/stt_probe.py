@@ -14,8 +14,8 @@ async def main():
         if ch["type"] == "audio":
             audio += ch["data"]
     print("записано байт (mp3):", len(audio))
-    async with httpx.AsyncClient() as c:
-        for i in (1, 2):
+    async with httpx.AsyncClient(limits=httpx.Limits(keepalive_expiry=3)) as c:
+        for i in (1, 2, 3):
             t = time.time()
             try:
                 r = await c.post(url, content=bytes(audio), headers={"Content-Type": "application/octet-stream"}, timeout=90)

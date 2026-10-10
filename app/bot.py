@@ -19,7 +19,7 @@ cfg = None
 
 
 async def post_init(app):
-    client = httpx.AsyncClient()
+    client = httpx.AsyncClient(limits=httpx.Limits(max_keepalive_connections=10, keepalive_expiry=3))
     h = cfg.hosts()
     providers = [Provider(f"cf {m.split('/')[-1]}", f"{h['ai']}/v1", "-", m) for m in cfg.cf_models]
     if cfg.cohere_key:
