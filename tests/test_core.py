@@ -302,3 +302,172 @@ def test_router_remembers_which_model_answered():
         await r.chat([{"role": "user", "content": "x"}])
         return r.last_model
     assert run(go()) == "p1"
+
+
+# ---------- браузер ----------
+from app import browser as br  # noqa: E402
+
+
+def test_host_is_public_blocks_internal_addresses():
+    for bad in ("127.0.0.1", "localhost", "10.1.2.3", "192.168.0.5", "169.254.169.254", "::1", "100.64.0.1"):
+        assert not br.host_is_public(bad), bad
+    assert br.host_is_public("8.8.8.8")
+    assert not br.host_is_public("нет-такого-сайта.invalid")
+
+
+def test_url_problem():
+    assert br.url_problem("https://example.com/a") is None
+    for bad in ("file:///etc/passwd", "ftp://x.ru", "javascript:alert(1)", "https://user:pw@x.ru", "https://"):
+        assert br.url_problem(bad), bad
+
+
+def item(**kw):
+    base = dict(id=0, tag="a", type="", role="", text="", name="", href="", inForm=False, formGet=False)
+    base.update(kw)
+    return base
+
+
+def test_click_policy():
+    assert br.click_block_reason(item(tag="a", text="Купить")) is None  # ссылки — навигация
+    assert br.click_block_reason(item(tag="button", inForm=True, type="submit", text="Найти"))
+    assert br.click_block_reason(item(tag="button", text="Оформить заказ"))
+    assert br.click_block_reason(item(tag="input", type="submit"))
+    assert br.click_block_reason(item(tag="button", text="Следующая страница")) is None
+    assert br.click_block_reason(item(tag="button", text="Принять cookies")) is None
+
+
+def test_type_policy():
+    assert br.type_block_reason(item(tag="input", type="text", text="Поиск"), submit=False) is None
+    assert br.type_block_reason(item(tag="input", type="password"), False)
+    assert br.type_block_reason(item(tag="input", type="text", name="cardnumber cc-number"), False)
+    assert br.type_block_reason(item(tag="button"), False)
+    assert br.type_block_reason(item(tag="input", type="text", formGet=False), submit=True)  # POST-форма
+    assert br.type_block_reason(item(tag="input", type="search"), submit=True) is None
+    assert br.type_block_reason(item(tag="input", type="text", formGet=True), submit=True) is None
+
+
+def test_decode_ddg_and_clean_text():
+    assert br.decode_ddg("https://duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fa&rut=x") == "https://example.com/a"
+    assert br.decode_ddg("https://x.ru/") == "https://x.ru/"
+    assert br.clean_text("  а   б \n\n\n в ") == "а б\nв"
+
+
+class FakeLoc:
+    def __init__(self, page): self.page = page
+    @property
+    def first(self): return self
+    async def click(self, timeout=0): self.page.log.append("click")
+    async def fill(self, text): self.page.log.append(("fill", text))
+    async def press(self, key): self.page.log.append(("press", key))
+
+
+class FakePage:
+    def __init__(self):
+        self.url, self.log, self.els = "https://example.com/", [], []
+        self.body = "Привет. " * 1000
+
+    async def goto(self, url, **kw):
+        self.url = url
+        return types.SimpleNamespace(status=200)
+    async def wait_for_load_state(self, *a, **kw): pass
+    async def title(self): return "Тест"
+    async def inner_text(self, sel): return self.body
+    async def evaluate(self, js): return self.els
+    def locator(self, sel):
+        self.log.append(sel)
+        return FakeLoc(self)
+
+
+import types  # noqa: E402
+
+
+def fake_browser(els=()):
+    b = br.Browser(allow_private=True)
+    b._page = FakePage()
+    b._page.els = list(els)
+    b._ctx = types.SimpleNamespace(pages=[b._page])
+    return b
+
+
+def test_browser_open_read_paging_and_untrusted_marker():
+    async def go():
+        b = fake_browser()
+        out = await b.open("https://example.com/")
+        assert "HTTP 200" in out and "данные из интернета" in out and "offset=3500" in out
+        assert "offset=" not in await b.read(offset=b._text and len(b._text) - 100)
+        with pytest.raises(br.BrowserError):
+            await b.open("file:///etc/passwd")
+    run(go())
+
+
+def test_browser_blocks_form_submit_but_allows_link_and_get_search():
+    els = [item(id=0, tag="a", text="Каталог", href="https://example.com/c"),
+           item(id=1, tag="button", type="submit", inForm=True, text="Оплатить"),
+           item(id=2, tag="input", type="search", text="Поиск", inForm=True, formGet=True),
+           item(id=3, tag="input", type="password", inForm=True)]
+
+    async def go():
+        b = fake_browser(els)
+        listing = await b.elements()
+        assert "ссылка «Каталог»" in listing and "→ https://example.com/c" in listing
+        assert "Страница" in await b.click(0)
+        with pytest.raises(br.BrowserError, match="заблокирован"):
+            await b.click(1)
+        assert "Текст введён" in await b.type(2, "кружка")
+        assert "Страница" in await b.type(2, "кружка", submit="true")
+        with pytest.raises(br.BrowserError, match="пароли"):
+            await b.type(3, "secret")
+        with pytest.raises(br.BrowserError, match="нет элемента"):
+            await b.click(99)
+        assert ("press", "Enter") in b._page.log and "click" in b._page.log
+    run(go())
+
+
+def test_browser_search_formats_results():
+    async def go():
+        b = fake_browser()
+        b._page.els = [{"t": "Кружки", "h": "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fshop.ru%2F", "s": "Купить кружки"}]
+        out = await b.search("кружка")
+        assert "1. Кружки" in out and "https://shop.ru/" in out
+        b._page.els = []
+        assert "ничего не вернул" in await b.search("x")
+    run(go())
+
+
+def test_guard_aborts_internal_and_images_but_allows_public():
+    class Req:
+        def __init__(self, url, rt="document"): self.url, self.resource_type = url, rt
+
+    class Route:
+        def __init__(self, req): self.request, self.done = req, None
+        async def abort(self): self.done = "abort"
+        async def continue_(self): self.done = "ok"
+
+    async def go():
+        b = br.Browser()  # защита включена
+        res = {}
+        for url, rt in [("http://127.0.0.1:8000/admin", "document"), ("http://169.254.169.254/", "xhr"),
+                        ("https://8.8.8.8/x", "document"), ("https://8.8.8.8/i.png", "image"),
+                        ("data:text/plain,hi", "other")]:
+            r = Route(Req(url, rt))
+            await b._guard(r)
+            res[url] = r.done
+        return res
+    res = run(go())
+    assert res["http://127.0.0.1:8000/admin"] == "abort" and res["http://169.254.169.254/"] == "abort"
+    assert res["https://8.8.8.8/x"] == "ok" and res["https://8.8.8.8/i.png"] == "abort" and res["data:text/plain,hi"] == "ok"
+
+
+def test_browser_refuses_to_start_without_memory(monkeypatch):
+    monkeypatch.setattr(br, "mem_available_mb", lambda: 50)
+
+    async def go():
+        with pytest.raises(br.BrowserError, match="мало свободной памяти"):
+            await br.Browser(allow_private=True).open("https://example.com/")
+    run(go())
+
+
+def test_browser_agent_has_expected_tools_and_more_steps():
+    from app.browser_agent import build
+    a = build(br.Browser())
+    assert [t.name for t in a.tools] == ["search", "open", "read", "elements", "click", "type"] and a.max_steps == 8

@@ -23,6 +23,7 @@ class Config:
     wb_token: str
     cf_models: tuple
     tts_voice: str
+    browser_enabled: bool = True
     cohere_key: str = ""
     cohere_models: tuple = COHERE_MODELS
     llm7_models: tuple = tuple(LLM7_MODELS)
@@ -54,6 +55,7 @@ def load():
         wb_token=os.environ.get("WB_TOKEN", "").strip(),
         cf_models=tuple(m.strip() for m in models.split(",") if m.strip()),
         tts_voice=os.environ.get("TTS_VOICE", "ru-RU-DmitryNeural").strip(),
+        browser_enabled=os.environ.get("BROWSER", "1").strip() != "0",
         cohere_key=os.environ.get("COHERE_API_KEY", "").strip(),
         llm7_key=os.environ.get("LLM7_API_KEY", "").strip(),
         mistral_key=os.environ.get("MISTRAL_API_KEY", "").strip(),

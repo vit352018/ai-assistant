@@ -7,6 +7,8 @@ from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandl
 from .config import load
 from .jsonutil import split_message
 from .llm import LLMError, LLMRouter, Provider
+from .browser import Browser
+from .browser_agent import build as build_browser_agent
 from .orchestrator import Orchestrator
 from .voice import synthesize, transcribe
 from .wb import WB
@@ -29,11 +31,17 @@ async def post_init(app):
         providers.append(Provider("sambanova", f"{h['sambanova']}/v1", cfg.sambanova_key, cfg.sambanova_model))
     llm = LLMRouter(client, providers)
     wb = WB(client, cfg.wb_token)
-    app.bot_data.update(client=client, llm=llm, wb=wb, always_voice=False,
-                        orch=Orchestrator(llm, [build_wb_agent(wb)]))
+    agents, browser = [build_wb_agent(wb)], None
+    if cfg.browser_enabled:
+        browser = Browser()
+        agents.append(build_browser_agent(browser))
+    app.bot_data.update(client=client, llm=llm, wb=wb, browser=browser, always_voice=False,
+                        orch=Orchestrator(llm, agents))
 
 
 async def post_shutdown(app):
+    if app.bot_data.get("browser"):
+        await app.bot_data["browser"].close()
     client = app.bot_data.get("client")  # его нет, если бот не смог даже запуститься
     if client:
         await client.aclose()
@@ -59,6 +67,11 @@ async def check(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         lines.append(f"✅ WB: магазин «{await d['wb'].seller()}»")
     except Exception as e:  # noqa: BLE001
         lines.append(f"❌ WB: {e}")
+    if d.get("browser"):
+        try:
+            lines.append("✅ Браузер: " + await d["browser"].selftest())
+        except Exception as e:  # noqa: BLE001
+            lines.append(f"❌ Браузер: {e}")
     try:
         ok = len(await synthesize("Проверка голоса", cfg.tts_voice)) > 0
         lines.append("✅ Голос (синтез)" if ok else "❌ Голос: пустой результат")

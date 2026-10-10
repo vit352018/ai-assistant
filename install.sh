@@ -13,6 +13,10 @@ id assistant >/dev/null 2>&1 || useradd --system --home "$APP" --shell /usr/sbin
 python3 -m venv "$APP/venv"
 "$APP/venv/bin/pip" install -q --no-cache-dir -r "$APP/requirements.txt"
 
+# Браузер для агента: Chromium и нужные ему системные библиотеки (несколько минут и ~0,5 ГБ диска)
+export PLAYWRIGHT_BROWSERS_PATH="$APP/browsers"
+"$APP/venv/bin/playwright" install --with-deps chromium
+
 chown -R assistant:assistant "$APP"
 chmod 600 "$APP/.env"
 
@@ -29,7 +33,8 @@ EnvironmentFile=$APP/.env
 ExecStart=$APP/venv/bin/python -m app.bot
 Restart=always
 RestartSec=5
-MemoryMax=350M
+Environment=PLAYWRIGHT_BROWSERS_PATH=$APP/browsers
+MemoryMax=650M
 NoNewPrivileges=true
 
 [Install]

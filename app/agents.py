@@ -26,6 +26,7 @@ class Agent:
     description: str  # по нему оркестратор решает, кому поручить задачу
     prompt: str
     tools: list = field(default_factory=list)
+    max_steps: int = 5
 
 
 def today():
@@ -38,8 +39,9 @@ def _final(data, raw):
     return raw
 
 
-async def run_agent(llm, agent, task, max_steps=5):
+async def run_agent(llm, agent, task, max_steps=None):
     """Цикл агента: модель просит инструмент -> получает результат -> ... -> final."""
+    max_steps = max_steps or agent.max_steps
     tools = {t.name: t for t in agent.tools}
     tool_text = "\n".join(f"- {t.name}: {t.description}" for t in agent.tools)
     system = f"{agent.prompt}\nСегодня {today()} (МСК).\n\nИнструменты:\n{tool_text}\n\n{PROTOCOL}"
