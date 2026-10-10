@@ -1,7 +1,7 @@
 import datetime as dt
 
 from .agents import Agent, Tool, today
-from .wb import WB, agg_orders, agg_sales, agg_stocks
+from .wb import WB, agg_orders, agg_sales, agg_stocks, extract_items
 
 PROMPT = """Ты — WB-агент: аналитик магазина на Wildberries. Работаешь ТОЛЬКО на чтение: менять цены, остатки и карточки ты пока не умеешь (эти действия появятся позже и только с подтверждением владельца).
 Сначала получи данные инструментами, затем дай выводы: что важно, что заканчивается, что падает или растёт. Если данных не хватает — скажи, чего именно."""
@@ -12,7 +12,12 @@ def build(wb: WB) -> Agent:
         return (today() - dt.timedelta(days=max(1, min(int(days), 90)))).isoformat()
 
     async def stocks(order="low", top=25):
-        rows = await wb.get("stats", "/api/v1/supplier/stocks", {"dateFrom": "2019-06-20"}, ttl=300)
+        # Старый метод statistics/supplier/stocks отключён 23.06.2026; остатки — в Analytics API (лимит 3 запроса в минуту)
+        resp = await wb.post_read("analytics", "/api/analytics/v1/stocks-report/wb-warehouses",
+                                  {"limit": 20000, "offset": 0}, ttl=300)
+        rows = extract_items(resp)
+        if not rows and resp:
+            return f"Остатки пусты или формат ответа WB изменился. Ключи ответа: {list(resp)[:8] if isinstance(resp, dict) else type(resp).__name__}"
         return agg_stocks(rows, order, int(top))
 
     async def sales(days=7):

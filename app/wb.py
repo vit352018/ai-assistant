@@ -7,6 +7,7 @@ HOSTS = {
     "content": "https://content-api.wildberries.ru",
     "feedbacks": "https://feedbacks-api.wildberries.ru",
     "common": "https://common-api.wildberries.ru",
+    "analytics": "https://seller-analytics-api.wildberries.ru",
 }
 
 
@@ -66,24 +67,49 @@ def _money(x):
     return f"{x:,.0f}".replace(",", " ")
 
 
+def extract_items(resp):
+    """Список строк из ответа WB: бывает {"data": {"items": [...]}}, {"data": [...]} или просто список."""
+    if isinstance(resp, list):
+        return resp
+    data = resp.get("data", resp) if isinstance(resp, dict) else None
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        for key in ("items", "rows", "stocks"):
+            if isinstance(data.get(key), list):
+                return data[key]
+    return []
+
+
+def _first(r, *keys, default=None):
+    for k in keys:
+        if r.get(k) not in (None, ""):
+            return r[k]
+    return default
+
+
 def agg_stocks(rows, order="low", top=25):
-    by = defaultdict(lambda: {"qty": 0, "to": 0, "back": 0, "price": 0, "disc": 0})
+    """Остатки по артикулам. Названия полей берём с запасом: формат ответа WB менялся."""
+    by = defaultdict(lambda: {"qty": 0, "to": 0, "back": 0, "price": None, "disc": None, "wh": set(), "nm": None})
     for r in rows:
-        a = by[r.get("supplierArticle") or str(r.get("nmId"))]
-        a["qty"] += r.get("quantity", 0)
-        a["to"] += r.get("inWayToClient", 0)
-        a["back"] += r.get("inWayFromClient", 0)
-        a["price"] = r.get("Price", a["price"])
-        a["disc"] = r.get("Discount", a["disc"])
+        nm = _first(r, "nmId", "nmID")
+        a = by[str(_first(r, "vendorCode", "supplierArticle", default=nm))]
+        a["qty"] += _first(r, "quantity", default=0)
+        a["to"] += _first(r, "inWayToClient", default=0)
+        a["back"] += _first(r, "inWayFromClient", default=0)
+        a["price"] = _first(r, "Price", "price", default=a["price"])
+        a["disc"] = _first(r, "Discount", "discount", default=a["disc"])
+        a["nm"] = nm
+        if r.get("warehouseName"):
+            a["wh"].add(r["warehouseName"])
     if not by:
         return "Остатков на складах WB нет."
     items = sorted(by.items(), key=lambda kv: kv[1]["qty"], reverse=(order == "high"))
     lines = [f"Артикулов: {len(by)}, штук на складах WB: {sum(v['qty'] for v in by.values())}"]
     for art, v in items[:top]:
-        lines.append(
-            f"{art}: {v['qty']} шт (к клиенту {v['to']}, возвраты {v['back']}), "
-            f"цена {v['price']}₽, скидка {v['disc']}%"
-        )
+        extra = f", цена {v['price']}₽, скидка {v['disc']}%" if v["price"] is not None else ""
+        lines.append(f"{art} (nm {v['nm']}): {v['qty']} шт на {len(v['wh'])} складах "
+                     f"(к клиенту {v['to']}, возвраты {v['back']}){extra}")
     return "\n".join(lines)
 
 

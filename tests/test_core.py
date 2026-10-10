@@ -140,7 +140,7 @@ STOCKS = [
 def test_agg_stocks():
     out = agg_stocks(STOCKS, "low")
     assert "Артикулов: 2" in out and "штук на складах WB: 108" in out
-    assert out.index("A1: 8") < out.index("B2: 100")  # сначала те, что заканчиваются
+    assert out.index("A1 (nm None): 8") < out.index("B2 (nm None): 100")  # сначала те, что заканчиваются
 
 
 def test_agg_sales_counts_returns_and_filters_dates():
@@ -195,8 +195,9 @@ def test_wb_sends_token_caches_and_maps_errors():
 def test_wb_agent_tools_end_to_end_with_fake_api():
     def handler(req):
         p = req.url.path
-        if p == "/api/v1/supplier/stocks":
-            return httpx.Response(200, json=STOCKS)
+        if p == "/api/analytics/v1/stocks-report/wb-warehouses":
+            assert req.method == "POST" and req.url.host == "seller-analytics-api.wildberries.ru"
+            return httpx.Response(200, json={"data": {"items": STOCKS}})
         if p == "/api/v2/list/goods/filter":
             return httpx.Response(200, json={"data": {"listGoods": [
                 {"nmID": 1, "vendorCode": "A1", "discount": 10, "sizes": [{"price": 1000, "discountedPrice": 900}]}]}})
@@ -212,7 +213,7 @@ def test_wb_agent_tools_end_to_end_with_fake_api():
     async def go():
         agent = wb_agent.build(make_wb(handler))
         tools = {t.name: t.fn for t in agent.tools}
-        assert "A1: 8 шт" in await tools["stocks"]()
+        assert "A1 (nm None): 8 шт" in await tools["stocks"]()
         assert "итого 900₽" in await tools["prices"](search="a1")
         assert "Кружка" in await tools["cards"](search="кружка")
         fb = await tools["feedbacks"]()
@@ -470,3 +471,39 @@ def test_browser_agent_has_expected_tools_and_more_steps():
     from app.browser_agent import build
     a = build(br.Browser())
     assert [t.name for t in a.tools] == ["search", "open", "read", "elements", "click", "type"] and a.max_steps == 8
+
+
+def test_extract_items_handles_shapes_and_new_fields():
+    from app.wb import extract_items
+    assert extract_items({"data": {"items": [1]}}) == [1] and extract_items({"data": [2]}) == [2] and extract_items([3]) == [3]
+    assert extract_items({"error": "x"}) == [] and extract_items({"data": {"other": 1}}) == []
+    new = [{"nmId": 7, "vendorCode": "K1", "warehouseName": "Коледино", "quantity": 4, "inWayToClient": 1},
+           {"nmId": 7, "vendorCode": "K1", "warehouseName": "Казань", "quantity": 6}]
+    out = agg_stocks(new, "high")
+    assert "K1 (nm 7): 10 шт на 2 складах" in out and "цена" not in out
+
+
+def test_stocks_tool_reports_unexpected_format():
+    def handler(req):
+        return httpx.Response(200, json={"weird": 1})
+
+    async def go():
+        tools = {t.name: t.fn for t in wb_agent.build(make_wb(handler)).tools}
+        assert "формат ответа WB изменился" in await tools["stocks"]()
+    run(go())
+
+
+def test_transcribe_retries_on_network_error_then_succeeds():
+    from app.voice import transcribe
+    calls = {"n": 0}
+
+    def handler(req):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise httpx.ConnectTimeout("")
+        return httpx.Response(200, json={"text": "готово"})
+
+    async def go():
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        return await transcribe(client, "https://x/ai", b"a")
+    assert run(go()) == "готово" and calls["n"] == 2

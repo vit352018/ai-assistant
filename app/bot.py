@@ -90,7 +90,7 @@ async def respond(update: Update, ctx: ContextTypes.DEFAULT_TYPE, text, voice_in
         answer = f"⚠️ Все бесплатные модели сейчас недоступны (обычно это лимиты). Попробуйте через минуту.\n{e}"
     except Exception as e:  # noqa: BLE001
         log.exception("handle failed")
-        answer = f"⚠️ Не получилось: {e}"
+        answer = f"⚠️ Не получилось: {type(e).__name__}: {e}"
     for part in split_message(answer):
         await update.message.reply_text(part)
     if voice_in or d["always_voice"]:
@@ -113,7 +113,7 @@ async def on_voice(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         text = await transcribe(d["client"], cfg.hosts()["ai"], bytes(await f.download_as_bytearray()))
     except Exception as e:  # noqa: BLE001
         log.exception("stt failed")
-        await update.message.reply_text(f"⚠️ Не удалось распознать голос: {e}")
+        await update.message.reply_text(f"⚠️ Не удалось распознать голос: {type(e).__name__}: {e}")
         return
     if not text:
         await update.message.reply_text("Не расслышал, повторите, пожалуйста.")
@@ -136,6 +136,8 @@ def main():
     tg = cfg.hosts()["tg"]
     app = (Application.builder().token(cfg.bot_token)
            .base_url(f"{tg}/bot").base_file_url(f"{tg}/file/bot")
+           .connect_timeout(15).read_timeout(30).write_timeout(30).pool_timeout(15)
+           .get_updates_read_timeout(40)
            .post_init(post_init).post_shutdown(post_shutdown).build())
     app.add_handler(CommandHandler("start", start, filters=owner))
     app.add_handler(CommandHandler("check", check, filters=owner))
