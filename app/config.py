@@ -4,13 +4,13 @@ from dataclasses import dataclass
 # Модели Workers AI по порядку: если у первой кончился дневной лимит, берём следующую.
 # Порядок = приоритет. Все модели Cloudflare делят один дневной лимит аккаунта.
 DEFAULT_CF_MODELS = (
-    "@cf/meta/llama-3.3-70b-instruct-fp8-fast,@cf/openai/gpt-oss-120b,@cf/moonshotai/kimi-k2.6,"
+    "@cf/meta/llama-3.3-70b-instruct-fp8-fast,@cf/openai/gpt-oss-120b,"
     "@cf/google/gemma-4-26b-a4b-it,@cf/zai-org/glm-4.7-flash,@cf/meta/llama-3.1-8b-instruct-fast"
 )
 COHERE_MODELS = ("command-a-03-2025", "command-r7b-12-2024")
 LLM7_MODELS = (
     "DeepSeek-V4.1-Flash", "GLM-5.3-Flash", "mistral-Small-24B-Instruct-2501", "gpt-oss:20b",
-    "gemma4:31b", "deepseek-v4-flash:0731", "kimi-k2.6", "llama-4-maverick", "mistral-large-3:675b",
+    "gemma4:31b", "deepseek-v4-flash:0731", "llama-4-maverick", "mistral-large-3:675b",
     "nemotron-3-nano:30b",
 )
 
