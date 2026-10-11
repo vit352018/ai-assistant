@@ -481,7 +481,7 @@ def test_extract_items_handles_shapes_and_new_fields():
     new = [{"nmId": 7, "vendorCode": "K1", "warehouseName": "Коледино", "quantity": 4, "inWayToClient": 1},
            {"nmId": 7, "vendorCode": "K1", "warehouseName": "Казань", "quantity": 6}]
     out = agg_stocks(new, "high")
-    assert "K1 (nm 7): 10 шт на 2 складах" in out and "цена" not in out
+    assert "K1 (nm 7): 10 шт, к клиенту 1" in out and "цена" not in out
 
 
 def test_stocks_tool_reports_unexpected_format():
@@ -636,3 +636,25 @@ def test_stocks_work_even_if_catalog_fails():
         tools = {t.name: t.fn for t in wb_agent.build(make_wb(handler)).tools}
         assert "5 (nm 5): 1 шт" in await tools["stocks"]()
     run(go())
+
+
+def test_stocks_max_qty_filter_and_truncation_note():
+    rows = [{"nmId": i, "quantity": i % 6} for i in range(1, 61)]
+    out = agg_stocks(rows, "low", top=200, max_qty=3)
+    assert "с остатком не больше 3 шт: 40" in out and "(nm 5): 5 шт" not in out
+    short = agg_stocks(rows, "low", top=200, max_qty=3, max_chars=300)
+    assert "не показано" in short and len(short) < 500
+
+
+def test_agent_stops_on_repeated_call_and_never_shows_raw_tool_json():
+    async def tool(top=1):
+        return "ДАННЫЕ"
+
+    agent = Agent("t", "тест", "x", [Tool("stocks", "d", tool)])
+    # зациклился на одном вызове, но после напоминания даёт ответ
+    llm = FakeLLM(['{"tool": "stocks", "args": {"top": 5}}'] * 2 + ['{"final": "Готово"}'])
+    assert run(run_agent(llm, agent, "?")) == "Готово"
+    # даже после напоминания продолжает вызывать инструмент — пользователь получает честное сообщение и данные
+    llm = FakeLLM(['{"tool": "stocks", "args": {"top": 5}}'] * 3)
+    out = run(run_agent(llm, agent, "?"))
+    assert "Не удалось собрать" in out and "ДАННЫЕ" in out and '"tool"' not in out

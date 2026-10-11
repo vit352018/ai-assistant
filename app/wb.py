@@ -107,7 +107,7 @@ def _first(r, *keys, default=None):
     return default
 
 
-def agg_stocks(rows, order="low", top=25, names=None):
+def agg_stocks(rows, order="low", top=25, names=None, max_qty=None, max_chars=3600):
     """Остатки по артикулам. Названия полей берём с запасом: формат ответа WB менялся."""
     by = defaultdict(lambda: {"qty": 0, "to": 0, "back": 0, "price": None, "disc": None, "wh": set(), "nm": None})
     for r in rows:
@@ -124,14 +124,28 @@ def agg_stocks(rows, order="low", top=25, names=None):
     if not by:
         return "Остатков на складах WB нет."
     items = sorted(by.items(), key=lambda kv: kv[1]["qty"], reverse=(order == "high"))
-    lines = [f"Артикулов: {len(by)}, штук на складах WB: {sum(v['qty'] for v in by.values())}"]
+    if max_qty is not None:
+        items = [kv for kv in items if kv[1]["qty"] <= max_qty]
     names = names or {}
-    for art, v in items[:top]:
-        extra = f", цена {v['price']}₽, скидка {v['disc']}%" if v["price"] is not None else ""
+    head = f"Артикулов: {len(by)}, штук на складах WB: {sum(v['qty'] for v in by.values())}"
+    if max_qty is not None:
+        head += f"; с остатком не больше {max_qty} шт: {len(items)}"
+    lines, used = [head], len(head)
+    for n, (art, v) in enumerate(items[:top]):
         info = names.get(v["nm"])
-        label = f"{info['vendorCode'] or art} «{info['title'][:60]}»" if info else art
-        lines.append(f"{label} (nm {v['nm']}): {v['qty']} шт на {len(v['wh'])} складах "
-                     f"(к клиенту {v['to']}, возвраты {v['back']}){extra}")
+        label = f"{info['vendorCode'] or art} «{info['title'][:50]}»" if info else art
+        line = f"{label} (nm {v['nm']}): {v['qty']} шт"
+        if v["price"] is not None:
+            line += f", цена {v['price']}₽, скидка {v['disc']}%"
+        if v["to"]:
+            line += f", к клиенту {v['to']}"
+        if v["back"]:
+            line += f", возвраты {v['back']}"
+        if used + len(line) > max_chars:  # ответ инструмента ограничен: честно говорим, сколько не поместилось
+            lines.append(f"…ещё {min(len(items), top) - n} товаров не показано (уточните max_qty или top)")
+            break
+        lines.append(line)
+        used += len(line)
     return "\n".join(lines)
 
 

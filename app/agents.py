@@ -46,6 +46,7 @@ async def run_agent(llm, agent, task, max_steps=None):
     tool_text = "\n".join(f"- {t.name}: {t.description}" for t in agent.tools)
     system = f"{agent.prompt}\nСегодня {today()} (МСК).\n\nИнструменты:\n{tool_text}\n\n{PROTOCOL}"
     msgs = [{"role": "system", "content": system}, {"role": "user", "content": task}]
+    seen, last_result = set(), ""
     for _ in range(max_steps):
         reply = await llm.chat(msgs)
         data = extract_json(reply)
@@ -54,6 +55,12 @@ async def run_agent(llm, agent, task, max_steps=None):
         name, args = data["tool"], data.get("args")
         args = args if isinstance(args, dict) else {}
         msgs.append({"role": "assistant", "content": reply})
+        key = (name, str(sorted(args.items())))
+        if key in seen:  # модель зациклилась на одном и том же вызове — данные уже есть
+            msgs.append({"role": "user", "content": 'Этот вызов уже был, результат выше. Не вызывай инструменты, '
+                                                    'дай итоговый ответ сейчас: {"final": "..."}'})
+            break
+        seen.add(key)
         tool = tools.get(name)
         if tool is None:
             result = f"Ошибка: нет инструмента {name}. Доступны: {', '.join(tools)}"
@@ -64,7 +71,13 @@ async def run_agent(llm, agent, task, max_steps=None):
                 result = f"Ошибка аргументов: {e}"
             except Exception as e:  # noqa: BLE001 — отдаём ошибку модели, пусть объяснит
                 result = f"Ошибка инструмента: {e}"
-        msgs.append({"role": "user", "content": f"Результат {name}:\n{str(result)[:MAX_TOOL_CHARS]}"})
-    msgs.append({"role": "user", "content": 'Шагов больше нет. Дай итоговый ответ сейчас: {"final": "..."}'})
+        last_result = str(result)
+        msgs.append({"role": "user", "content": f"Результат {name}:\n{last_result[:MAX_TOOL_CHARS]}"})
+    else:
+        msgs.append({"role": "user", "content": 'Шагов больше нет. Дай итоговый ответ сейчас: {"final": "..."}'})
     reply = await llm.chat(msgs)
-    return _final(extract_json(reply), reply)
+    data = extract_json(reply)
+    if data and "tool" in data and "final" not in data:  # модель так и не дала ответ — не показываем сырой вызов
+        tail = f"\n\nПоследние полученные данные:\n{last_result[:1500]}" if last_result else ""
+        return "Не удалось собрать итоговый ответ. Попробуйте уточнить вопрос." + tail
+    return _final(data, reply)

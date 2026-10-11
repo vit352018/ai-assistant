@@ -11,7 +11,7 @@ def build(wb: WB) -> Agent:
     def since(days):
         return (today() - dt.timedelta(days=max(1, min(int(days), 90)))).isoformat()
 
-    async def stocks(order="low", top=25):
+    async def stocks(order="low", top=None, max_qty=None):
         # Старый метод statistics/supplier/stocks отключён 23.06.2026; остатки — в Analytics API (лимит 3 запроса в минуту)
         resp = await wb.post_read("analytics", "/api/analytics/v1/stocks-report/wb-warehouses",
                                   {"limit": 20000, "offset": 0}, ttl=300)
@@ -22,7 +22,8 @@ def build(wb: WB) -> Agent:
             names = await wb.catalog()  # артикулы и названия, чтобы по остаткам можно было найти товар в базе
         except Exception:  # noqa: BLE001 — без названий остатки всё равно полезны
             names = {}
-        return agg_stocks(rows, order, int(top), names)
+        limit = int(max_qty) if max_qty not in (None, "") else None
+        return agg_stocks(rows, order, int(top or (200 if limit is not None else 25)), names, limit)
 
     async def sales(days=7):
         s = since(days)
@@ -66,7 +67,7 @@ def build(wb: WB) -> Agent:
         return "\n".join(lines)
 
     tools = [
-        Tool("stocks", "остатки на складах WB: артикул, название и количество каждого товара (названия уже включены, cards для них вызывать не нужно). Аргументы: order='low' (сначала мало) или 'high', top=число строк (по умолчанию 25, для полного списка — 200)", stocks),
+        Tool("stocks", "остатки на складах WB: артикул, название и количество каждого товара (названия уже включены, cards для них вызывать не нужно). Аргументы: order='low' (сначала мало) или 'high', max_qty=число (показать только товары с остатком не больше этого числа, например 3 для «меньше 4 штук»), top=число строк (по умолчанию 25)", stocks),
         Tool("sales", "продажи и возвраты за период. Аргумент: days=число дней (по умолчанию 7, максимум 90)", sales),
         Tool("orders", "заказы и отмены за период. Аргумент: days=число дней (по умолчанию 7)", orders),
         Tool("prices", "текущие цены и скидки. Аргументы: search='часть артикула' (необязательно), top=число строк", prices),
