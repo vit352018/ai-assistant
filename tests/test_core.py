@@ -507,3 +507,18 @@ def test_transcribe_retries_on_network_error_then_succeeds():
         client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
         return await transcribe(client, "https://x/ai", b"a")
     assert run(go()) == "готово" and calls["n"] == 2
+
+
+def test_transcribe_sends_base64_text():
+    import base64
+    from app.voice import transcribe
+
+    def handler(req):
+        assert req.headers["content-type"].startswith("text/plain")
+        assert req.content == base64.b64encode(b"OGGDATA")
+        return httpx.Response(200, json={"text": "ок"})
+
+    async def go():
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        return await transcribe(client, "https://x/ai", b"OGGDATA")
+    assert run(go()) == "ок"

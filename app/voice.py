@@ -2,6 +2,7 @@ import re
 
 
 async def transcribe(client, ai_base, audio, tries=4):
+    import base64
     """Голос -> текст через свой Worker (Whisper). Обрыв соединения — частое дело,
     поэтому при нём сразу повторяем: пул соединений выкинет испорченное и откроет новое."""
     import asyncio
@@ -10,8 +11,8 @@ async def transcribe(client, ai_base, audio, tries=4):
     last = ""
     for i in range(tries):
         try:
-            r = await client.post(f"{ai_base}/stt", content=audio, timeout=timeout,
-                                  headers={"Content-Type": "application/octet-stream"})
+            r = await client.post(f"{ai_base}/stt", content=base64.b64encode(audio), timeout=timeout,
+                                  headers={"Content-Type": "text/plain"})
         except httpx.TransportError as e:
             last = f"{type(e).__name__}: соединение с Worker оборвалось"
             await asyncio.sleep(0.5)

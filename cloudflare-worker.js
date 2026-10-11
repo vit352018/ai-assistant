@@ -1,4 +1,4 @@
-// Cloudflare Worker: (1) пересылает запросы к Telegram, Mistral, SambaNova, LLM7, Cohere;
+// Cloudflare Worker: (1) пересылает запросы к Telegram, Mistral, SambaNova, Cohere;
 // (2) даёт боту ИИ от Cloudflare (Workers AI) и распознавание речи (Whisper).
 // Адрес: https://<имя>.workers.dev/<СЕКРЕТ>/<цель>/...  Без правильного секрета отвечает 404.
 // Для /ai нужна привязка (Binding) Workers AI с именем переменной AI.
@@ -7,7 +7,6 @@ const TARGETS = {
   tg: "https://api.telegram.org",
   mistral: "https://api.mistral.ai",
   sambanova: "https://api.sambanova.ai",
-  llm7: "https://api.llm7.io",
   cohere: "https://api.cohere.com",
 };
 
@@ -49,10 +48,9 @@ async function handleAI(request, env, path) {
       return json({ choices: [{ message: { role: "assistant", content: text } }] });
     }
     if (path === "stt") {
-      const bytes = new Uint8Array(await request.arrayBuffer());
-      let bin = "";
-      for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-      const out = await env.AI.run("@cf/openai/whisper-large-v3-turbo", { audio: btoa(bin), language: "ru" });
+      // Звук приходит уже в base64 (готовит сервер): здесь только передаём его в Whisper.
+      const audio = (await request.text()).trim();
+      const out = await env.AI.run("@cf/openai/whisper-large-v3-turbo", { audio, language: "ru" });
       return json({ text: toText(out.text ?? out) });
     }
   } catch (e) {
