@@ -19,7 +19,9 @@ cfg = None
 
 
 async def post_init(app):
-    client = httpx.AsyncClient(limits=httpx.Limits(max_keepalive_connections=10, keepalive_expiry=3))
+    # Соединения не переиспользуем: через мобильную/сетевую прослойку переиспользованное соединение
+    # может «зависнуть» на 15 секунд. Каждый запрос идёт по новому соединению.
+    client = httpx.AsyncClient(limits=httpx.Limits(max_keepalive_connections=0))
     h = cfg.hosts()
     providers = [Provider(f"cf {m.split('/')[-1]}", f"{h['ai']}/v1", "-", m) for m in cfg.cf_models]
     if cfg.cohere_key:
