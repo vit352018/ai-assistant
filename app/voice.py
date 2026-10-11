@@ -23,7 +23,7 @@ async def transcribe(client, ai_base, audio, tries=4):
         if r.status_code not in (429, 502, 503, 504):
             break
         await asyncio.sleep(2 * (i + 1))
-    raise RuntimeError(last)
+    raise RuntimeError(f"{last} (запись {len(audio) // 1024} КБ, попыток {tries})")
 
 
 def clean_for_speech(text, limit=900):
