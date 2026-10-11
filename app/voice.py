@@ -1,29 +1,40 @@
 import re
 
 
-async def transcribe(client, ai_base, audio, tries=4):
-    import base64
-    """Голос -> текст через свой Worker (Whisper). Обрыв соединения — частое дело,
-    поэтому при нём сразу повторяем: пул соединений выкинет испорченное и откроет новое."""
+async def _stt_post(client, url, tries, note="", **kw):
+    """Запрос на распознавание с повторами: обрыв соединения — частое дело, поэтому повторяем сразу."""
     import asyncio
     import httpx
     timeout = httpx.Timeout(connect=15, read=60, write=30, pool=15)
     last = ""
     for i in range(tries):
         try:
-            r = await client.post(f"{ai_base}/stt", content=base64.b64encode(audio), timeout=timeout,
-                                  headers={"Content-Type": "text/plain"})
+            r = await client.post(url, timeout=timeout, **kw)
         except httpx.TransportError as e:
             last = f"{type(e).__name__}: соединение с Worker оборвалось"
             await asyncio.sleep(0.5)
             continue
         if r.status_code == 200:
             return (r.json().get("text") or "").strip()
-        last = f"HTTP {r.status_code}: {r.text[:120]}"
+        last = f"HTTP {r.status_code}: {r.text[:200]}"
         if r.status_code not in (429, 502, 503, 504):
             break
         await asyncio.sleep(2 * (i + 1))
-    raise RuntimeError(f"{last} (запись {len(audio) // 1024} КБ, попыток {tries})")
+    raise RuntimeError(f"{last}{note}")
+
+
+async def transcribe_telegram(client, ai_base, bot_token, file_id, tries=3):
+    """Голос -> текст. На сервере из России большие запросы к Cloudflare обрываются, поэтому сам звук
+    не отправляем: Worker получает только file_id, скачивает запись у Telegram и распознаёт её Whisper'ом."""
+    return await _stt_post(client, f"{ai_base}/stt-telegram", tries,
+                           json={"token": bot_token, "file_id": file_id})
+
+
+async def transcribe(client, ai_base, audio, tries=3):
+    """Распознавание готовой записи (до ~15 КБ). Нужно для проверочных скриптов."""
+    import base64
+    return await _stt_post(client, f"{ai_base}/stt", tries, f" (запись {len(audio) // 1024} КБ)",
+                           content=base64.b64encode(audio), headers={"Content-Type": "text/plain"})
 
 
 def clean_for_speech(text, limit=900):

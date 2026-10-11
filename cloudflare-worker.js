@@ -21,6 +21,14 @@ function toText(v) {
   return "";
 }
 
+// Звук в base64: встроенный метод, если есть, иначе кусками (так дешевле по процессорному времени).
+function toBase64(bytes) {
+  if (typeof bytes.toBase64 === "function") return bytes.toBase64();
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -46,6 +54,18 @@ async function handleAI(request, env, path) {
       });
       const text = toText(out.response ?? out.choices?.[0]?.message?.content ?? out);
       return json({ choices: [{ message: { role: "assistant", content: text } }] });
+    }
+    if (path === "stt-telegram") {
+      // Сервер в России не может отправить в Cloudflare запись больше ~25 КБ (сеть обрывает соединение),
+      // поэтому присылает только file_id: запись скачивает сам Worker (Cloudflare -> Telegram работает без ограничений).
+      const { token, file_id } = await request.json();
+      const info = await (await fetch(`https://api.telegram.org/bot${token}/getFile?file_id=${encodeURIComponent(file_id)}`)).json();
+      if (!info.ok) return json({ error: "Telegram getFile: " + JSON.stringify(info).slice(0, 200) }, 502);
+      const file = await fetch(`https://api.telegram.org/file/bot${token}/${info.result.file_path}`);
+      if (!file.ok) return json({ error: "Telegram file HTTP " + file.status }, 502);
+      const audio = toBase64(new Uint8Array(await file.arrayBuffer()));
+      const out = await env.AI.run("@cf/openai/whisper-large-v3-turbo", { audio, language: "ru" });
+      return json({ text: toText(out.text ?? out) });
     }
     if (path === "stt") {
       // Звук приходит уже в base64 (готовит сервер): здесь только передаём его в Whisper.

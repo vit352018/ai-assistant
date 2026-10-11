@@ -10,7 +10,7 @@ from .llm import LLMError, LLMRouter, Provider
 from .browser import Browser
 from .browser_agent import build as build_browser_agent
 from .orchestrator import Orchestrator
-from .voice import synthesize, transcribe
+from .voice import synthesize, transcribe_telegram
 from .wb import WB
 from .wb_agent import build as build_wb_agent
 
@@ -111,8 +111,7 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def on_voice(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     d = ctx.application.bot_data
     try:
-        f = await update.message.voice.get_file()
-        text = await transcribe(d["client"], cfg.hosts()["ai"], bytes(await f.download_as_bytearray()))
+        text = await transcribe_telegram(d["client"], cfg.hosts()["ai"], cfg.bot_token, update.message.voice.file_id)
     except Exception as e:  # noqa: BLE001
         log.exception("stt failed")
         await update.message.reply_text(f"⚠️ Не удалось распознать голос: {type(e).__name__}: {e}")

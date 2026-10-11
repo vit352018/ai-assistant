@@ -1,7 +1,32 @@
+import json
 import logging
 import time
 
 log = logging.getLogger("llm")
+
+# Связь сервера с Cloudflare обрывается, если одним запросом отправить больше ~25 КБ (проверено замером:
+# 15 КБ проходит, 30 КБ — нет). Поэтому тело запроса к модели держим в пределах 15 КБ.
+MAX_BODY_BYTES = 15000
+
+
+def _size(msgs):
+    return len(json.dumps(msgs, ensure_ascii=False).encode())
+
+
+def fit_messages(messages, budget=MAX_BODY_BYTES - 600):
+    """Сокращает самые длинные сообщения (сначала старые), пока запрос не уложится в budget байт."""
+    msgs = [dict(m) for m in messages]
+    for _ in range(80):
+        if _size(msgs) <= budget:
+            break
+        pool = [i for i, m in enumerate(msgs) if m["role"] != "system" and len(m["content"]) > 200] \
+            or [i for i, m in enumerate(msgs) if len(m["content"]) > 200]
+        if not pool:
+            break
+        i = max(pool, key=lambda k: len(msgs[k]["content"]))
+        keep = int(len(msgs[i]["content"]) * 0.7)
+        msgs[i]["content"] = msgs[i]["content"][:keep].rstrip() + " …(обрезано)"
+    return msgs
 
 class LLMError(Exception):
     pass
@@ -68,12 +93,12 @@ class LLMRouter:
         raise LLMError("; ".join(errors))
 
     async def _call(self, p, messages, max_tokens, temperature):
-        r = await self.client.post(
-            f"{p.base_url}/chat/completions",
-            headers={"Authorization": f"Bearer {p.key}"} if p.key else {},
-            json={"model": p.model, "messages": messages, "temperature": temperature, "max_tokens": max_tokens},
-            timeout=40,
-        )
+        body = json.dumps({"model": p.model, "messages": fit_messages(messages),
+                           "temperature": temperature, "max_tokens": max_tokens}, ensure_ascii=False).encode()
+        headers = {"Content-Type": "application/json"}
+        if p.key:
+            headers["Authorization"] = f"Bearer {p.key}"
+        r = await self.client.post(f"{p.base_url}/chat/completions", content=body, headers=headers, timeout=40)
         if r.status_code == 429:
             p.pause_until = time.time() + _retry_after(r)
             raise LLMError("лимит запросов (429)")

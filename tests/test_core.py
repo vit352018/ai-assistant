@@ -523,3 +523,62 @@ def test_transcribe_sends_base64_text():
         client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
         return await transcribe(client, "https://x/ai", b"OGGDATA")
     assert run(go()) == "ок"
+
+
+def test_fit_messages_shrinks_old_big_messages_and_keeps_system_and_last():
+    from app.llm import fit_messages, _size
+    msgs = [{"role": "system", "content": "Системная инструкция " * 20},
+            {"role": "user", "content": "Задача"},
+            {"role": "assistant", "content": '{"tool": "stocks"}'},
+            {"role": "user", "content": "Результат: " + "данные " * 1500},
+            {"role": "assistant", "content": '{"tool": "sales"}'},
+            {"role": "user", "content": "Результат: " + "цифры " * 1500}]
+    assert _size(msgs) > 14000
+    out = fit_messages(msgs)
+    assert _size(out) <= 14400
+    assert out[0]["content"] == msgs[0]["content"] and out[1]["content"] == "Задача"
+    assert out[3]["content"].endswith("…(обрезано)") and out[-1]["content"].startswith("Результат:")
+    small = [{"role": "user", "content": "привет"}]
+    assert fit_messages(small) == small
+
+
+def test_router_request_body_stays_under_limit():
+    sizes = []
+
+    def handler(req):
+        sizes.append(len(req.content))
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ок"}}]})
+
+    async def go():
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        r = LLMRouter(client, [Provider("p", "https://p.test/v1", "k", "m")])
+        await r.chat([{"role": "system", "content": "s"}, {"role": "user", "content": "очень длинный текст " * 3000}])
+    run(go())
+    assert sizes and sizes[0] < 15000
+
+
+def test_transcribe_telegram_sends_only_file_id():
+    from app.voice import transcribe_telegram
+    import json as _json
+
+    def handler(req):
+        assert req.url.path == "/SEC/ai/stt-telegram"
+        body = _json.loads(req.content)
+        assert body == {"token": "TOK", "file_id": "FID"} and len(req.content) < 200
+        return httpx.Response(200, json={"text": " покажи остатки "})
+
+    async def go():
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        return await transcribe_telegram(client, "https://x.workers.dev/SEC/ai", "TOK", "FID")
+    assert run(go()) == "покажи остатки"
+
+
+def test_transcribe_telegram_shows_worker_error_text():
+    from app.voice import transcribe_telegram
+
+    async def go():
+        client = httpx.AsyncClient(transport=httpx.MockTransport(
+            lambda req: httpx.Response(400, json={"error": "decode failed"})))
+        with pytest.raises(RuntimeError, match="decode failed"):
+            await transcribe_telegram(client, "https://x/ai", "T", "F")
+    run(go())
