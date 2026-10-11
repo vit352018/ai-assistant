@@ -238,10 +238,11 @@ def test_hosts_via_proxy():
 
 
 def test_transcribe_posts_audio_to_worker():
+    import base64
     from app.voice import transcribe
 
     def handler(req):
-        assert req.url.path == "/SEC/ai/stt" and req.content == b"OGG"
+        assert req.url.path == "/SEC/ai/stt" and req.content == base64.b64encode(b"OGG")
         return httpx.Response(200, json={"text": " покажи остатки "})
 
     async def go():
