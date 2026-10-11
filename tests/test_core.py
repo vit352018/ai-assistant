@@ -658,3 +658,13 @@ def test_agent_stops_on_repeated_call_and_never_shows_raw_tool_json():
     llm = FakeLLM(['{"tool": "stocks", "args": {"top": 5}}'] * 3)
     out = run(run_agent(llm, agent, "?"))
     assert "Не удалось собрать" in out and "ДАННЫЕ" in out and '"tool"' not in out
+
+
+def test_salvage_truncated_final_answer():
+    from app.agents import salvage_final, _final
+    raw = '{"final":"Товары:\\n1. Щит – 0 шт\\n2. Плинтус 50*70*'
+    out = salvage_final(raw)
+    assert out.startswith("Товары:\n1. Щит – 0 шт\n2. Плинтус 50*70*") and "оборвался" in out
+    assert _final(None, raw) == out
+    assert _final(None, "обычный текст") == "обычный текст"
+    assert salvage_final('{"final":"Привет"}') .startswith("Привет")

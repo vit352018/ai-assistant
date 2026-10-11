@@ -1,4 +1,6 @@
 import datetime as dt
+import json
+import re
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable
 
@@ -33,10 +35,29 @@ def today():
     return dt.datetime.now(MSK).date()
 
 
+def salvage_final(raw):
+    """Ответ вида {"final": "текст..." оборвался на лимите длины, JSON не закрыт: достаём текст как есть."""
+    m = re.search(r'"final"\s*:\s*"', raw)
+    if not m:
+        return None
+    body = raw[m.end():].rstrip()
+    if body.endswith('"}'):
+        body = body[:-2]
+    for _ in range(12):  # отрезаем недописанный хвост (обрыв посреди \n, \uXXXX и т.п.)
+        try:
+            text = json.loads('"' + body + '"')
+            break
+        except ValueError:
+            body = body[:-1]
+    else:
+        text = body.replace("\\n", "\n").replace('\\"', '"')
+    return text.rstrip() + "\n\n…(ответ оборвался из-за лимита длины; попросите показать остаток списка)"
+
+
 def _final(data, raw):
     if data:
         return str(data.get("final") or data.get("answer") or raw)
-    return raw
+    return salvage_final(raw) or raw
 
 
 async def run_agent(llm, agent, task, max_steps=None):

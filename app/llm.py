@@ -69,7 +69,7 @@ class LLMRouter:
         self.providers = providers
         self.last_model = ""  # какая модель ответила на последний запрос
 
-    async def chat(self, messages, max_tokens=1500, temperature=0.2):
+    async def chat(self, messages, max_tokens=3000, temperature=0.2):
         import asyncio
         errors = []
         for attempt in range(2):  # второй круг — если все провайдеры лишь временно заняты
