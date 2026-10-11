@@ -18,7 +18,11 @@ def build(wb: WB) -> Agent:
         rows = extract_items(resp)
         if not rows and resp:
             return f"Остатки пусты или формат ответа WB изменился. Ключи ответа: {list(resp)[:8] if isinstance(resp, dict) else type(resp).__name__}"
-        return agg_stocks(rows, order, int(top))
+        try:
+            names = await wb.catalog()  # артикулы и названия, чтобы по остаткам можно было найти товар в базе
+        except Exception:  # noqa: BLE001 — без названий остатки всё равно полезны
+            names = {}
+        return agg_stocks(rows, order, int(top), names)
 
     async def sales(days=7):
         s = since(days)
@@ -62,7 +66,7 @@ def build(wb: WB) -> Agent:
         return "\n".join(lines)
 
     tools = [
-        Tool("stocks", "остатки на складах WB по артикулам. Аргументы: order='low' (сначала мало) или 'high', top=число строк", stocks),
+        Tool("stocks", "остатки на складах WB: артикул, название и количество каждого товара (названия уже включены, cards для них вызывать не нужно). Аргументы: order='low' (сначала мало) или 'high', top=число строк (по умолчанию 25, для полного списка — 200)", stocks),
         Tool("sales", "продажи и возвраты за период. Аргумент: days=число дней (по умолчанию 7, максимум 90)", sales),
         Tool("orders", "заказы и отмены за период. Аргумент: days=число дней (по умолчанию 7)", orders),
         Tool("prices", "текущие цены и скидки. Аргументы: search='часть артикула' (необязательно), top=число строк", prices),

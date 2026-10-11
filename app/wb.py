@@ -22,6 +22,7 @@ class WB:
         self.client = client
         self.token = token
         self._cache = {}
+        self._catalog = None
 
     async def get(self, host, path, params=None, ttl=0):
         return await self._req("GET", host, path, params=params, ttl=ttl)
@@ -53,6 +54,24 @@ class WB:
         if ttl:
             self._cache[key] = (time.time(), data)
         return data
+
+    async def catalog(self, max_pages=10):
+        """Все карточки магазина: nmID -> артикул, название, бренд. Кэш на час (карточки меняются редко)."""
+        if self._catalog and time.time() - self._catalog[0] < 3600:
+            return self._catalog[1]
+        names, cursor = {}, {"limit": 100}
+        for _ in range(max_pages):
+            body = {"settings": {"sort": {"ascending": False}, "filter": {"withPhoto": -1}, "cursor": cursor}}
+            data = await self.post_read("content", "/content/v2/get/cards/list", body, {"locale": "ru"})
+            for c in data.get("cards", []):
+                names[c.get("nmID")] = {"vendorCode": c.get("vendorCode") or "", "title": c.get("title") or "",
+                                        "brand": c.get("brand") or ""}
+            cur = data.get("cursor") or {}
+            if cur.get("total", 0) < cursor["limit"]:
+                break
+            cursor = {"limit": 100, "updatedAt": cur.get("updatedAt"), "nmID": cur.get("nmID")}
+        self._catalog = (time.time(), names)
+        return names
 
     async def seller(self):
         data = await self.get("common", "/api/v1/seller-info", ttl=60)
@@ -88,7 +107,7 @@ def _first(r, *keys, default=None):
     return default
 
 
-def agg_stocks(rows, order="low", top=25):
+def agg_stocks(rows, order="low", top=25, names=None):
     """Остатки по артикулам. Названия полей берём с запасом: формат ответа WB менялся."""
     by = defaultdict(lambda: {"qty": 0, "to": 0, "back": 0, "price": None, "disc": None, "wh": set(), "nm": None})
     for r in rows:
@@ -106,9 +125,12 @@ def agg_stocks(rows, order="low", top=25):
         return "Остатков на складах WB нет."
     items = sorted(by.items(), key=lambda kv: kv[1]["qty"], reverse=(order == "high"))
     lines = [f"Артикулов: {len(by)}, штук на складах WB: {sum(v['qty'] for v in by.values())}"]
+    names = names or {}
     for art, v in items[:top]:
         extra = f", цена {v['price']}₽, скидка {v['disc']}%" if v["price"] is not None else ""
-        lines.append(f"{art} (nm {v['nm']}): {v['qty']} шт на {len(v['wh'])} складах "
+        info = names.get(v["nm"])
+        label = f"{info['vendorCode'] or art} «{info['title'][:60]}»" if info else art
+        lines.append(f"{label} (nm {v['nm']}): {v['qty']} шт на {len(v['wh'])} складах "
                      f"(к клиенту {v['to']}, возвраты {v['back']}){extra}")
     return "\n".join(lines)
 

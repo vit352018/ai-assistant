@@ -582,3 +582,57 @@ def test_transcribe_telegram_shows_worker_error_text():
         with pytest.raises(RuntimeError, match="decode failed"):
             await transcribe_telegram(client, "https://x/ai", "T", "F")
     run(go())
+
+
+def test_orchestrator_hands_stray_tool_call_to_the_right_agent():
+    async def tool():
+        return "данные"
+
+    agent = Agent("wb", "магазин", "x", [Tool("cards", "d", tool)])
+    llm = FakeLLM(['We need cards.\n{"tool": "cards", "args": {}}', '{"final": "Названия: ..."}'])
+    o = Orchestrator(llm, [agent])
+    assert run(o.handle("дай названия")) == "Названия: ..."  # а не сырой JSON пользователю
+    llm = FakeLLM(['{"что-то": "странное"}'])
+    assert "Не понял" in run(Orchestrator(llm, [agent]).handle("?"))
+
+
+def test_catalog_paginates_and_stocks_get_names():
+    pages = [
+        {"cards": [{"nmID": i, "vendorCode": f"V{i}", "title": f"Товар {i}", "brand": "Б"} for i in (1, 2)],
+         "cursor": {"updatedAt": "t1", "nmID": 2, "total": 100}},  # total == limit: есть следующая страница
+        {"cards": [{"nmID": 3, "vendorCode": "V3", "title": "Товар 3", "brand": "Б"}],
+         "cursor": {"updatedAt": "t2", "nmID": 3, "total": 1}},
+    ]
+    seen = []
+
+    def handler(req):
+        import json as j
+        if req.url.path == "/content/v2/get/cards/list":
+            cursor = j.loads(req.content)["settings"]["cursor"]
+            seen.append(cursor)
+            return httpx.Response(200, json=pages[len(seen) - 1])
+        return httpx.Response(200, json={"data": {"items": [
+            {"nmId": 3, "warehouseName": "Склад WB", "quantity": 2},
+            {"nmId": 1, "warehouseName": "Склад WB", "quantity": 0}]}})
+
+    async def go():
+        wb = make_wb(handler)
+        names = await wb.catalog(max_pages=5)
+        assert set(names) == {1, 2, 3} and seen[1].get("nmID") == 2  # вторая страница запрошена по курсору
+        assert await wb.catalog() is names  # из кэша: запросов больше нет
+        tools = {t.name: t.fn for t in wb_agent.build(wb).tools}
+        out = await tools["stocks"](top=10)
+        assert "V1 «Товар 1» (nm 1): 0 шт" in out and "V3 «Товар 3» (nm 3): 2 шт" in out
+    run(go())
+
+
+def test_stocks_work_even_if_catalog_fails():
+    def handler(req):
+        if req.url.path == "/content/v2/get/cards/list":
+            return httpx.Response(403)
+        return httpx.Response(200, json={"data": {"items": [{"nmId": 5, "quantity": 1}]}})
+
+    async def go():
+        tools = {t.name: t.fn for t in wb_agent.build(make_wb(handler)).tools}
+        assert "5 (nm 5): 1 шт" in await tools["stocks"]()
+    run(go())

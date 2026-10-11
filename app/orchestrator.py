@@ -35,11 +35,17 @@ class Orchestrator:
             {"role": "user", "content": f"{ctx}Новое сообщение: {text}"},
         ])
         data = extract_json(reply)
+        agent, task = None, text
         if data and data.get("agent") in self.agents:
-            task = f"{ctx}Задача: {data.get('task') or text}"
-            answer = await run_agent(self.llm, self.agents[data["agent"]], task)
+            agent, task = self.agents[data["agent"]], data.get("task") or text
+        elif data and "tool" in data:  # модель сразу вызвала инструмент — отдаём задачу агенту, у которого он есть
+            agent = next((a for a in self.agents.values() if any(t.name == data["tool"] for t in a.tools)), None)
+        if agent:
+            answer = await run_agent(self.llm, agent, f"{ctx}Задача: {task}")
         elif data and "answer" in data:
             answer = str(data["answer"])
+        elif data:
+            answer = "Не понял, как это выполнить. Переформулируйте, пожалуйста."
         else:
             answer = reply
         self.history.append(("Владелец", text))
