@@ -80,10 +80,15 @@ r = await call({ token: "TOK", chat_id: 5, text: "привет" });
 assert.equal((await r.json()).method, "sendAudio");
 assert.deepEqual(log.forms.map((f) => f[0]), ["sendVoice", "sendAudio"]);
 
-// 3) Microsoft не вернул звук -> понятная ошибка 502
+// 3) Microsoft не вернул звук, запасной голос тоже недоступен -> одна понятная ошибка 502
+setup({ noAudio: true, googleFails: true });
+r = await call({ token: "TOK", chat_id: 5, text: "привет" });
+assert.equal(r.status, 502); assert.match((await r.json()).error, /не вернул звук.*запасной голос/);
+
+// 3a) Microsoft не вернул звук, но запасной голос работает -> ответ всё равно придёт
 setup({ noAudio: true });
 r = await call({ token: "TOK", chat_id: 5, text: "привет" });
-assert.equal(r.status, 502); assert.match((await r.json()).error, /не вернул звук/);
+assert.equal((await r.json()).engine, "google");
 
 // 3b) Microsoft ответил 403 -> запасной голос Google: текст режется на куски до 180 знаков, куски склеиваются
 log = setup({ edge403: true });
