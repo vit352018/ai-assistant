@@ -4,11 +4,12 @@ import fs from "node:fs";
 import assert from "node:assert/strict";
 
 const FIXED = 1791750000000;
-const src = fs.readFileSync(new URL("../cloudflare-worker.js", import.meta.url), "utf8").replace("ВСТАВЬТЕ_СЕКРЕТ", "SEC");
+const src = fs.readFileSync(new URL("../cloudflare-worker.js", import.meta.url), "utf8");
 fs.writeFileSync("/tmp/worker_under_test.mjs", src);
 const worker = (await import("/tmp/worker_under_test.mjs")).default;
 Date.now = () => FIXED;
 
+const ENV = { AI: {}, SECRET: "SEC" };
 const enc = (s) => new TextEncoder().encode(s);
 function audioFrame(bytes) {
   const head = enc("X-RequestId:abc\r\nContent-Type:audio/mpeg\r\nX-Timestamp:t\r\nPath:audio\r\n");
@@ -57,7 +58,7 @@ function setup({ voiceFails = false, noAudio = false, edge403 = false, googleFai
   };
   return log;
 }
-const call = (body) => worker.fetch(new Request("https://x.workers.dev/SEC/ai/tts-telegram", { method: "POST", body: JSON.stringify(body) }), { AI: {} });
+const call = (body) => worker.fetch(new Request("https://x.workers.dev/SEC/ai/tts-telegram", { method: "POST", body: JSON.stringify(body) }), ENV);
 
 // 1) обычная озвучка: звук склеен, отправлен как voice, текст экранирован
 let log = setup();
@@ -107,8 +108,12 @@ const err = (await r.json()).error;
 assert.equal(r.status, 502); assert.match(err, /HTTP 403 Forbidden by policy/); assert.match(err, /запасной голос: Google TTS HTTP 429/);
 
 // 4) чужой секрет не пускает
-r = await worker.fetch(new Request("https://x.workers.dev/WRONG/ai/tts-telegram", { method: "POST", body: "{}" }), { AI: {} });
+r = await worker.fetch(new Request("https://x.workers.dev/WRONG/ai/tts-telegram", { method: "POST", body: "{}" }), ENV);
 assert.equal(r.status, 404);
+
+// 5) без переменной SECRET Worker не работает (а не пускает всех)
+r = await worker.fetch(new Request("https://x.workers.dev/SEC/ai/tts-telegram", { method: "POST", body: "{}" }), { AI: {} });
+assert.equal(r.status, 500);
 
 console.log("GEC=" + gec);
 console.log("worker: все проверки пройдены");

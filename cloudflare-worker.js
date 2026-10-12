@@ -2,7 +2,8 @@
 // (2) даёт боту ИИ от Cloudflare (Workers AI), распознавание речи (Whisper) и озвучку ответов (Edge TTS).
 // Адрес: https://<имя>.workers.dev/<СЕКРЕТ>/<цель>/...  Без правильного секрета отвечает 404.
 // Для /ai нужна привязка (Binding) Workers AI с именем переменной AI.
-const SECRET = "U35OwTZfeQm6S-F3pspqxwxe";
+// Секрет НЕ записывается в этот файл (репозиторий публичный): он задаётся в Cloudflare,
+// Worker -> Settings -> Variables and Secrets -> переменная SECRET (тип Secret).
 const TARGETS = {
   tg: "https://api.telegram.org",
   mistral: "https://api.mistral.ai",
@@ -31,9 +32,10 @@ function toBase64(bytes) {
 
 export default {
   async fetch(request, env) {
+    if (!env.SECRET) return new Response("SECRET не задан в настройках Worker", { status: 500 });
     const url = new URL(request.url);
     const parts = url.pathname.split("/").filter(Boolean);
-    if (parts[0] !== SECRET) return new Response("not found", { status: 404 });
+    if (parts[0] !== env.SECRET) return new Response("not found", { status: 404 });
     if (parts[1] === "ai") return handleAI(request, env, parts.slice(2).join("/"));
     if (!TARGETS[parts[1]]) return new Response("not found", { status: 404 });
     const rest = "/" + parts.slice(2).join("/");
