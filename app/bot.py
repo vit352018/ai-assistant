@@ -10,7 +10,7 @@ from .llm import LLMError, LLMRouter, Provider
 from .browser import Browser
 from .browser_agent import build as build_browser_agent
 from .orchestrator import Orchestrator
-from .voice import synthesize, transcribe_telegram
+from .voice import speak_via_worker, synthesize, transcribe_telegram, wants_voice
 from .wb import WB
 from .wb_agent import build as build_wb_agent
 
@@ -51,14 +51,25 @@ async def post_shutdown(app):
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Привет! Я ваш помощник. Пишите или говорите голосом, например: «что с остатками?» или «продажи за неделю».\n"
-        "/check — проверить, что всё подключено\n/voice — отвечать голосом всегда (повторно — выключить)"
+        "/check — проверить, что всё подключено\n/voicetest — проверить голосовой ответ\n"
+        "Чтобы получить ответ голосом, добавьте в вопрос «ответь голосом» или «озвучь».\n/voice — отвечать голосом всегда (повторно — выключить)"
     )
 
 
 async def voice_toggle(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     d = ctx.application.bot_data
     d["always_voice"] = not d["always_voice"]
-    await update.message.reply_text("Голосовые ответы всегда: " + ("включены" if d["always_voice"] else "выключены (только на ваши голосовые)"))
+    await update.message.reply_text("Голосовые ответы всегда: " + ("включены" if d["always_voice"] else "выключены (голос — только по просьбе)"))
+
+
+async def voicetest(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    d = ctx.application.bot_data
+    try:
+        method = await speak_via_worker(d["client"], cfg.hosts()["ai"], cfg.bot_token, update.effective_chat.id,
+                                        "Проверка голоса. Раз, два, три.", cfg.tts_voice, update.message.message_id)
+        await update.message.reply_text(f"✅ Голос отправлен ({method})")
+    except Exception as e:  # noqa: BLE001
+        await update.message.reply_text(f"❌ Голос: {type(e).__name__}: {e}")
 
 
 async def check(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -95,13 +106,13 @@ async def respond(update: Update, ctx: ContextTypes.DEFAULT_TYPE, text, voice_in
         answer = f"⚠️ Не получилось: {type(e).__name__}: {e}"
     for part in split_message(answer):
         await update.message.reply_text(part)
-    if voice_in or d["always_voice"]:
+    if d["always_voice"] or wants_voice(text):  # голос — только по просьбе (или если включён /voice)
         try:
-            audio = await synthesize(spoken, cfg.tts_voice)
-            if audio:
-                await update.message.reply_voice(audio)
-        except Exception:  # noqa: BLE001 — текст уже отправлен, голос не критичен
+            await speak_via_worker(d["client"], cfg.hosts()["ai"], cfg.bot_token, update.effective_chat.id,
+                                   spoken, cfg.tts_voice, update.message.message_id)
+        except Exception as e:  # noqa: BLE001 — текст уже отправлен, о сбое голоса говорим прямо
             log.exception("tts failed")
+            await update.message.reply_text(f"🔇 Голосом не получилось: {type(e).__name__}: {e}")
 
 
 async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -142,6 +153,7 @@ def main():
            .post_init(post_init).post_shutdown(post_shutdown).build())
     app.add_handler(CommandHandler("start", start, filters=owner))
     app.add_handler(CommandHandler("check", check, filters=owner))
+    app.add_handler(CommandHandler("voicetest", voicetest, filters=owner))
     app.add_handler(CommandHandler("voice", voice_toggle, filters=owner))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & owner, on_text))
     app.add_handler(MessageHandler(filters.VOICE & owner, on_voice))

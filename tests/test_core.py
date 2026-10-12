@@ -668,3 +668,32 @@ def test_salvage_truncated_final_answer():
     assert _final(None, raw) == out
     assert _final(None, "обычный текст") == "обычный текст"
     assert salvage_final('{"final":"Привет"}') .startswith("Привет")
+
+
+def test_wants_voice_only_on_explicit_request():
+    from app.voice import wants_voice
+    for yes in ("ответь голосом", "озвучь ответ", "Пришли голосовое сообщение с остатками", "скажи вслух",
+                "покажи остатки и ответь мне голосом"):
+        assert wants_voice(yes), yes
+    for no in ("покажи остатки", "что с продажами за неделю", "голосование за товар", ""):
+        assert not wants_voice(no), no
+
+
+def test_speak_via_worker_sends_only_text_and_reports_errors():
+    from app.voice import speak_via_worker
+    import json as _json
+
+    def ok(req):
+        assert req.url.path == "/SEC/ai/tts-telegram"
+        body = _json.loads(req.content)
+        assert body["chat_id"] == 5 and body["reply_to"] == 9 and len(req.content) < 3000 and "**" not in body["text"]
+        return httpx.Response(200, json={"ok": True, "method": "sendVoice"})
+
+    async def go():
+        client = httpx.AsyncClient(transport=httpx.MockTransport(ok))
+        assert await speak_via_worker(client, "https://x/SEC/ai", "T", 5, "**Привет**, мир", "v", 9) == "sendVoice"
+        bad = httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(502, json={"error": "Edge TTS: таймаут"})))
+        with pytest.raises(RuntimeError, match="Edge TTS: таймаут"):
+            await speak_via_worker(bad, "https://x/SEC/ai", "T", 5, "текст", "v")
+        assert await speak_via_worker(client, "https://x/SEC/ai", "T", 5, "😀", "v") == "пусто"
+    run(go())
