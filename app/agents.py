@@ -7,7 +7,7 @@ from typing import Awaitable, Callable
 from .jsonutil import extract_json
 
 MSK = dt.timezone(dt.timedelta(hours=3))
-MAX_TOOL_CHARS = 4000
+MAX_TOOL_CHARS = 4600
 
 PROTOCOL = """Формат ответа — ТОЛЬКО один JSON-объект, без текста вокруг:
   вызвать инструмент: {"tool": "имя", "args": {"аргумент": значение}}
@@ -51,7 +51,7 @@ def salvage_final(raw):
             body = body[:-1]
     else:
         text = body.replace("\\n", "\n").replace('\\"', '"')
-    return text.rstrip() + "\n\n…(ответ оборвался из-за лимита длины; попросите показать остаток списка)"
+    return text.rstrip() + "\n\n…(ответ мог прийти не полностью; если список короче ожидаемого — попросите показать остаток)"
 
 
 def _final(data, raw):

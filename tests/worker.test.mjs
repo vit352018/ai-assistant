@@ -32,12 +32,17 @@ class FakeWS {
   }
 }
 
-function setup({ voiceFails = false, noAudio = false } = {}) {
+function setup({ voiceFails = false, noAudio = false, edge403 = false, googleFails = false } = {}) {
   const log = { urls: [], forms: [], ws: null };
   const frames = noAudio ? [] : [audioFrame(new Uint8Array(30000).fill(1)), audioFrame(new Uint8Array(25000).fill(2))];
   globalThis.fetch = async (url, init = {}) => {
     const u = String(url); log.urls.push(u);
+    if (u.startsWith("https://translate.google.com")) {
+      log.google = (log.google || []).concat(decodeURIComponent(u.split("&q=")[1]));
+      return googleFails ? new Response("no", { status: 429 }) : new Response(new Uint8Array(1000).fill(3));
+    }
     if (u.startsWith("https://speech.platform.bing.com")) {
+      if (edge403) return new Response("Forbidden by policy", { status: 403 });
       assert.equal(init.headers.Upgrade, "websocket");
       assert.match(init.headers.Origin, /^chrome-extension:/);
       log.ws = new FakeWS(frames);
@@ -58,7 +63,7 @@ const call = (body) => worker.fetch(new Request("https://x.workers.dev/SEC/ai/tt
 let log = setup();
 let r = await call({ token: "TOK", chat_id: 5, text: "Щит <18> & плинтус", voice: "ru-RU-DmitryNeural", reply_to: 9 });
 let body = await r.json();
-assert.equal(r.status, 200); assert.deepEqual([body.ok, body.bytes, body.method], [true, 55000, "sendVoice"]);
+assert.equal(r.status, 200); assert.deepEqual([body.ok, body.bytes, body.method, body.engine], [true, 55000, "sendVoice", "edge"]);
 const gec = log.urls[0].match(/Sec-MS-GEC=([0-9A-F]+)&/)[1];
 assert.match(log.urls[0], /TrustedClientToken=6A5AA1D4EAFF4E9FB37E23D68491D6F4/);
 assert.match(log.urls[0], /Sec-MS-GEC-Version=1-143\.0\.3650\.75/);
@@ -79,6 +84,22 @@ assert.deepEqual(log.forms.map((f) => f[0]), ["sendVoice", "sendAudio"]);
 setup({ noAudio: true });
 r = await call({ token: "TOK", chat_id: 5, text: "привет" });
 assert.equal(r.status, 502); assert.match((await r.json()).error, /не вернул звук/);
+
+// 3b) Microsoft ответил 403 -> запасной голос Google: текст режется на куски до 180 знаков, куски склеиваются
+log = setup({ edge403: true });
+const long = "Первое предложение про остатки на складе. ".repeat(8) + "Конец.";
+r = await call({ token: "TOK", chat_id: 5, text: long });
+body = await r.json();
+assert.equal(r.status, 200); assert.equal(body.engine, "google");
+assert.ok(log.google.length >= 2 && log.google.every((c) => c.length <= 180), "куски до 180 знаков");
+assert.equal(body.bytes, log.google.length * 1000);
+assert.equal(log.forms[0][0], "sendVoice");
+
+// 3c) не работают оба голоса -> одна ошибка с причинами обоих
+setup({ edge403: true, googleFails: true });
+r = await call({ token: "TOK", chat_id: 5, text: "привет" });
+const err = (await r.json()).error;
+assert.equal(r.status, 502); assert.match(err, /HTTP 403 Forbidden by policy/); assert.match(err, /запасной голос: Google TTS HTTP 429/);
 
 // 4) чужой секрет не пускает
 r = await worker.fetch(new Request("https://x.workers.dev/WRONG/ai/tts-telegram", { method: "POST", body: "{}" }), { AI: {} });

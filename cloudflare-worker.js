@@ -85,7 +85,10 @@ async function edgeTTS(text, voice) {
     },
   });
   const ws = resp.webSocket;
-  if (!ws) throw new Error("Edge TTS не принял соединение, HTTP " + resp.status);
+  if (!ws) {
+    const body = await resp.text().catch(() => "");
+    throw new Error(`Edge TTS не принял соединение, HTTP ${resp.status} ${body.slice(0, 120)}`.trim());
+  }
   ws.accept();
 
   return await new Promise((resolve, reject) => {
@@ -126,6 +129,54 @@ async function edgeTTS(text, voice) {
       `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'><voice name='${voice}'>` +
       `<prosody pitch='+0Hz' rate='+0%' volume='+0%'>${clean}</prosody></voice></speak>`);
   });
+}
+
+// Запасной голос: озвучка Google Translate (русская, попроще), если Microsoft не пускает Worker.
+function splitText(text, max = 180) {
+  const out = [];
+  let cur = "";
+  for (const s of text.split(/(?<=[.!?…:;])\s+/)) {
+    if ((cur + " " + s).trim().length <= max) { cur = (cur + " " + s).trim(); continue; }
+    if (cur) out.push(cur);
+    let rest = s;
+    while (rest.length > max) {
+      let cut = rest.lastIndexOf(" ", max);
+      if (cut < max / 2) cut = max;
+      out.push(rest.slice(0, cut));
+      rest = rest.slice(cut).trim();
+    }
+    cur = rest;
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
+async function googleTTS(text) {
+  const chunks = [];
+  for (const part of splitText(text)) {
+    const r = await fetch(`https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=ru&q=${encodeURIComponent(part)}`, {
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36", Referer: "https://translate.google.com/" },
+    });
+    if (!r.ok) throw new Error("Google TTS HTTP " + r.status);
+    chunks.push(new Uint8Array(await r.arrayBuffer()));
+  }
+  const out = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
+  let pos = 0;
+  for (const c of chunks) { out.set(c, pos); pos += c.length; }
+  if (!out.length) throw new Error("Google TTS не вернул звук");
+  return out;
+}
+
+async function synthesize(text, voice) {
+  try {
+    return { mp3: await edgeTTS(text, voice), engine: "edge" };
+  } catch (e1) {
+    try {
+      return { mp3: await googleTTS(text), engine: "google" };
+    } catch (e2) {
+      throw new Error(`${e1.message}; запасной голос: ${e2.message}`);
+    }
+  }
 }
 
 async function sendTelegramAudio(token, chatId, mp3, replyTo) {
@@ -171,9 +222,9 @@ async function handleAI(request, env, path) {
     }
     if (path === "tts-telegram") {
       const { token, chat_id, text, voice, reply_to } = await request.json();
-      const mp3 = await edgeTTS(String(text).slice(0, 1200), voice || "ru-RU-DmitryNeural");
+      const { mp3, engine } = await synthesize(String(text).slice(0, 1200), voice || "ru-RU-DmitryNeural");
       const method = await sendTelegramAudio(token, chat_id, mp3, reply_to);
-      return json({ ok: true, bytes: mp3.length, method });
+      return json({ ok: true, bytes: mp3.length, method, engine });
     }
     if (path === "stt") {
       // Звук приходит уже в base64 (готовит сервер): здесь только передаём его в Whisper.

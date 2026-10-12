@@ -622,7 +622,7 @@ def test_catalog_paginates_and_stocks_get_names():
         assert await wb.catalog() is names  # из кэша: запросов больше нет
         tools = {t.name: t.fn for t in wb_agent.build(wb).tools}
         out = await tools["stocks"](top=10)
-        assert "V1 «Товар 1» (nm 1): 0 шт" in out and "V3 «Товар 3» (nm 3): 2 шт" in out
+        assert "V1 «Товар 1»: 0 шт" in out and "V3 «Товар 3»: 2 шт" in out
     run(go())
 
 
@@ -664,7 +664,7 @@ def test_salvage_truncated_final_answer():
     from app.agents import salvage_final, _final
     raw = '{"final":"Товары:\\n1. Щит – 0 шт\\n2. Плинтус 50*70*'
     out = salvage_final(raw)
-    assert out.startswith("Товары:\n1. Щит – 0 шт\n2. Плинтус 50*70*") and "оборвался" in out
+    assert out.startswith("Товары:\n1. Щит – 0 шт\n2. Плинтус 50*70*") and "не полностью" in out
     assert _final(None, raw) == out
     assert _final(None, "обычный текст") == "обычный текст"
     assert salvage_final('{"final":"Привет"}') .startswith("Привет")
@@ -691,7 +691,7 @@ def test_speak_via_worker_sends_only_text_and_reports_errors():
 
     async def go():
         client = httpx.AsyncClient(transport=httpx.MockTransport(ok))
-        assert await speak_via_worker(client, "https://x/SEC/ai", "T", 5, "**Привет**, мир", "v", 9) == "sendVoice"
+        assert (await speak_via_worker(client, "https://x/SEC/ai", "T", 5, "**Привет**, мир", "v", 9)).startswith("sendVoice")
         bad = httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(502, json={"error": "Edge TTS: таймаут"})))
         with pytest.raises(RuntimeError, match="Edge TTS: таймаут"):
             await speak_via_worker(bad, "https://x/SEC/ai", "T", 5, "текст", "v")

@@ -74,7 +74,8 @@ async def speak_via_worker(client, ai_base, bot_token, chat_id, text, voice, rep
             await asyncio.sleep(0.5)
             continue
         if r.status_code == 200:
-            return r.json().get("method", "ok")
+            j = r.json()
+            return f"{j.get('method', 'ok')}, голос {j.get('engine', '?')}"
         last = f"HTTP {r.status_code}: {r.text[:200]}"
         break
     raise RuntimeError(last)

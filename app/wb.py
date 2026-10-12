@@ -107,7 +107,7 @@ def _first(r, *keys, default=None):
     return default
 
 
-def agg_stocks(rows, order="low", top=25, names=None, max_qty=None, max_chars=3600):
+def agg_stocks(rows, order="low", top=25, names=None, max_qty=None, max_chars=4200):
     """Остатки по артикулам. Названия полей берём с запасом: формат ответа WB менялся."""
     by = defaultdict(lambda: {"qty": 0, "to": 0, "back": 0, "price": None, "disc": None, "wh": set(), "nm": None})
     for r in rows:
@@ -133,8 +133,8 @@ def agg_stocks(rows, order="low", top=25, names=None, max_qty=None, max_chars=36
     lines, used = [head], len(head)
     for n, (art, v) in enumerate(items[:top]):
         info = names.get(v["nm"])
-        label = f"{info['vendorCode'] or art} «{info['title'][:50]}»" if info else art
-        line = f"{label} (nm {v['nm']}): {v['qty']} шт"
+        label = f"{info['vendorCode'] or art} «{info['title'][:45]}»" if info else f"{art} (nm {v['nm']})"
+        line = f"{label}: {v['qty']} шт"
         if v["price"] is not None:
             line += f", цена {v['price']}₽, скидка {v['disc']}%"
         if v["to"]:
