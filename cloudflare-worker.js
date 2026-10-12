@@ -2,7 +2,7 @@
 // (2) даёт боту ИИ от Cloudflare (Workers AI), распознавание речи (Whisper) и озвучку ответов (Edge TTS).
 // Адрес: https://<имя>.workers.dev/<СЕКРЕТ>/<цель>/...  Без правильного секрета отвечает 404.
 // Для /ai нужна привязка (Binding) Workers AI с именем переменной AI.
-const SECRET = "ВСТАВЬТЕ_СЕКРЕТ";
+const SECRET = "U35OwTZfeQm6S-F3pspqxwxe";
 const TARGETS = {
   tg: "https://api.telegram.org",
   mistral: "https://api.mistral.ai",
