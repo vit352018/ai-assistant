@@ -2,13 +2,16 @@
 Запуск: cd /opt/assistant && set -a && . ./.env && set +a && PYTHONPATH=. venv/bin/python scripts/smoke.py"""
 import asyncio
 import os
+import sys
 import time
 
 import httpx
 
-from app import wb_agent
-from app.browser import Browser, BrowserError
-from app.wb import WB
+os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", "/opt/assistant/browsers")  # где служба хранит Chromium
+
+from app import wb_agent  # noqa: E402
+from app.browser import Browser, BrowserError  # noqa: E402
+from app.wb import WB  # noqa: E402
 
 
 def short(text, n=500):
@@ -26,15 +29,16 @@ async def step(name, coro):
 
 
 async def main():
-    print("=== WB (инструменты агента, живые данные) ===")
-    async with httpx.AsyncClient(limits=httpx.Limits(max_keepalive_connections=0)) as client:
-        tools = {t.name: t.fn for t in wb_agent.build(WB(client, os.environ["WB_TOKEN"])).tools}
-        await step("stocks (остаток ≤3, 5 строк)", tools["stocks"](max_qty=3, top=5))
-        await step("sales (7 дней)", tools["sales"](days=7))
-        await step("orders (7 дней)", tools["orders"](days=7))
-        await step("prices (3 строки)", tools["prices"](top=3))
-        await step("cards (3 строки)", tools["cards"](top=3))
-        await step("feedbacks (2 без ответа)", tools["feedbacks"](top=2))
+    if "browser" not in sys.argv:
+        print("=== WB (инструменты агента, живые данные) ===")
+        async with httpx.AsyncClient(limits=httpx.Limits(max_keepalive_connections=0)) as client:
+            tools = {t.name: t.fn for t in wb_agent.build(WB(client, os.environ["WB_TOKEN"])).tools}
+            await step("stocks (остаток ≤3, 5 строк)", tools["stocks"](max_qty=3, top=5))
+            await step("sales (7 дней)", tools["sales"](days=7))
+            await step("orders (7 дней)", tools["orders"](days=7))
+            await step("prices (3 строки)", tools["prices"](top=3))
+            await step("cards (3 строки)", tools["cards"](top=3))
+            await step("feedbacks (2 без ответа)", tools["feedbacks"](top=2))
 
     print("\n=== Браузер ===")
     b = Browser()

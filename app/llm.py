@@ -9,6 +9,14 @@ log = logging.getLogger("llm")
 MAX_BODY_BYTES = 15000
 
 
+def looks_degenerate(text):
+    """Модель иногда зацикливается и выдаёт «!!!!!!…» на весь лимит длины. Это не ответ."""
+    from collections import Counter
+    if len(text) < 80:
+        return False
+    return Counter(text).most_common(1)[0][1] / len(text) > 0.6
+
+
 def _size(msgs):
     return len(json.dumps(msgs, ensure_ascii=False).encode())
 
@@ -111,6 +119,9 @@ class LLMRouter:
         text = _text(r.json()["choices"][0]["message"].get("content"))
         if not text:
             raise LLMError("пустой ответ")
+        if looks_degenerate(text):
+            p.pause_until = time.time() + 120  # на этом запросе модель сбоит — не дёргаем её пару минут
+            raise LLMError("модель зациклилась (повторяет один символ)")
         return text
 
     async def ping(self):

@@ -697,3 +697,26 @@ def test_speak_via_worker_sends_only_text_and_reports_errors():
             await speak_via_worker(bad, "https://x/SEC/ai", "T", 5, "текст", "v")
         assert await speak_via_worker(client, "https://x/SEC/ai", "T", 5, "😀", "v") == "пусто"
     run(go())
+
+
+def test_degenerate_reply_is_an_error_and_next_model_answers():
+    from app.llm import looks_degenerate
+    assert looks_degenerate("!" * 500) and looks_degenerate("а" * 90)
+    assert not looks_degenerate("Нормальный ответ с цифрами 123 и текстом. " * 5) and not looks_degenerate("!!!")
+
+    def handler(req):
+        text = "!" * 800 if req.url.host == "p0.test" else "Нормальный ответ."
+        return httpx.Response(200, json={"choices": [{"message": {"content": text}}]})
+
+    async def go():
+        r, ps = make_router(handler)
+        out = await r.chat([{"role": "user", "content": "x"}])
+        return out, r.last_model, ps[0].pause_until > 0
+    assert run(go()) == ("Нормальный ответ.", "p1", True)
+
+
+def test_articles_with_newlines_are_cleaned():
+    rows = [{"date": "2026-10-09T10:00:00", "saleID": "S1", "supplierArticle": "4656760334105\n", "forPay": 10, "priceWithDisc": 12},
+            {"nmId": 5, "vendorCode": "АБВ\n", "quantity": 1}]
+    assert "4656760334105: 1 шт" in agg_sales(rows[:1], "2026-10-01")
+    assert "АБВ (nm 5): 1 шт" in agg_stocks(rows[1:])

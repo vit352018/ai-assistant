@@ -78,6 +78,11 @@ class WB:
         return data.get("tradeMark") or data.get("name") or "?"
 
 
+def _clean(s):
+    """В данных WB встречаются артикулы с переводом строки в конце — убираем лишние пробелы и переносы."""
+    return " ".join(str(s).split())
+
+
 def _day(s):
     return (s or "")[:10]
 
@@ -112,7 +117,7 @@ def agg_stocks(rows, order="low", top=25, names=None, max_qty=None, max_chars=42
     by = defaultdict(lambda: {"qty": 0, "to": 0, "back": 0, "price": None, "disc": None, "wh": set(), "nm": None})
     for r in rows:
         nm = _first(r, "nmId", "nmID")
-        a = by[str(_first(r, "vendorCode", "supplierArticle", default=nm))]
+        a = by[_clean(_first(r, "vendorCode", "supplierArticle", default=nm))]
         a["qty"] += _first(r, "quantity", default=0)
         a["to"] += _first(r, "inWayToClient", default=0)
         a["back"] += _first(r, "inWayFromClient", default=0)
@@ -133,7 +138,7 @@ def agg_stocks(rows, order="low", top=25, names=None, max_qty=None, max_chars=42
     lines, used = [head], len(head)
     for n, (art, v) in enumerate(items[:top]):
         info = names.get(v["nm"])
-        label = f"{info['vendorCode'] or art} «{info['title'][:45]}»" if info else f"{art} (nm {v['nm']})"
+        label = f"{_clean(info['vendorCode']) or art} «{_clean(info['title'])[:45]}»" if info else f"{art} (nm {v['nm']})"
         line = f"{label}: {v['qty']} шт"
         if v["price"] is not None:
             line += f", цена {v['price']}₽, скидка {v['disc']}%"
@@ -163,7 +168,7 @@ def agg_sales(rows, since, top=15):
         pay += fp
         sales += sign > 0
         returns += sign < 0
-        a = arts[r.get("supplierArticle") or str(r.get("nmId"))]
+        a = arts[_clean(r.get("supplierArticle") or r.get("nmId"))]
         a[0] += sign
         a[1] += fp
         days[d][0] += sign
@@ -195,7 +200,7 @@ def agg_orders(rows, since, top=15):
         ok += 1
         price = float(r.get("priceWithDisc") or 0)
         total += price
-        a = arts[r.get("supplierArticle") or str(r.get("nmId"))]
+        a = arts[_clean(r.get("supplierArticle") or r.get("nmId"))]
         a[0] += 1
         a[1] += price
         days[d] += 1

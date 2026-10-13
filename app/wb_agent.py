@@ -44,7 +44,7 @@ def build(wb: WB) -> Agent:
             sizes = g.get("sizes") or [{}]
             price = min(s.get("price", 0) for s in sizes)
             final = min(s.get("discountedPrice", 0) for s in sizes)
-            out.append(f"{g.get('vendorCode')} (nm {g.get('nmID')}): цена {price}₽, скидка {g.get('discount', 0)}%, итого {final}₽")
+            out.append(f"{' '.join(str(g.get('vendorCode')).split())} (nm {g.get('nmID')}): цена {price}₽, скидка {g.get('discount', 0)}%, итого {final}₽")
         return f"Найдено товаров: {len(out)}\n" + "\n".join(out[: int(top)])
 
     async def cards(search="", top=20):
