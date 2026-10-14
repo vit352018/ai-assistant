@@ -1,14 +1,22 @@
 import datetime as dt
+import json
 
 from .agents import Agent, Tool, today
+from .stock_actions import ProposalError, pick_warehouse, propose_stock_update
 from .wb import WB, agg_orders, agg_sales, agg_stocks, extract_items
 
-PROMPT = """Ты — WB-агент: аналитик магазина на Wildberries. Работаешь ТОЛЬКО на чтение: менять цены, остатки и карточки ты пока не умеешь (эти действия появятся позже и только с подтверждением владельца).
-Сначала получи данные инструментами, затем дай выводы: что важно, что заканчивается, что падает или растёт. Если данных не хватает — скажи, чего именно.
+PROMPT = """Ты — WB-агент: аналитик магазина на Wildberries. Данные ты получаешь инструментами и сам ничего в WB не меняешь.
+Изменить остатки FBS можно только инструментом propose_stock_update: он НИЧЕГО не меняет, а лишь готовит предложение, которое владелец подтверждает кнопкой ✅ в чате.
+Правила для изменений:
+- Бери товары и количества строго из слов владельца. Не угадывай артикулы и числа; если что-то неясно — спроси.
+- Перед предложением можно посмотреть текущие остатки (fbs_stocks), чтобы не ошибиться.
+- После вызова propose_stock_update скажи, что предложение показано с кнопками и ПОКА НИЧЕГО НЕ ИЗМЕНЕНО. Никогда не пиши, что остатки уже изменены.
+- Цены, скидки и карточки пока менять нельзя — скажи об этом, если попросят.
+Для анализа: сначала получи данные, затем дай выводы: что важно, что заканчивается, что падает или растёт. Если данных не хватает — скажи, чего именно.
 Всегда называй общее число найденных позиций из ответа инструмента; если инструмент сообщил, что часть товаров не показана, скажи об этом и предложи показать остальные."""
 
 
-def build(wb: WB) -> Agent:
+def build(wb: WB, store=None) -> Agent:
     def since(days):
         return (today() - dt.timedelta(days=max(1, min(int(days), 90)))).isoformat()
 
@@ -67,12 +75,52 @@ def build(wb: WB) -> Agent:
                          f"{str(f.get('createdDate', ''))[:10]}: {str(f.get('text', ''))[:200]}")
         return "\n".join(lines)
 
+    async def fbs_warehouses():
+        whs = await wb.warehouses()
+        return "\n".join(f"{w.get('id')}: {w.get('name')}" for w in whs) or "Складов продавца нет."
+
+    async def fbs_stocks(top=30, max_qty=None, warehouse_id=None):
+        catalog = await wb.catalog()
+        wh = await pick_warehouse(wb, warehouse_id)
+        by_chrt = {sz["chrtId"]: (nm, c) for nm, c in catalog.items() for sz in c.get("sizes", [])}
+        amounts = await wb.fbs_stocks(wh["id"], list(by_chrt))
+        rows = sorted(((amounts.get(cid, 0), nm, c) for cid, (nm, c) in by_chrt.items()), key=lambda r: r[0])
+        if max_qty not in (None, ""):
+            rows = [r for r in rows if r[0] <= int(max_qty)]
+        lines, used = [f"Склад «{wh.get('name')}» (id {wh['id']}): подходит позиций {len(rows)}"], 0
+        for n, (qty, nm, c) in enumerate(rows[: int(top)]):
+            line = f"{' '.join(c['vendorCode'].split())} «{' '.join(c['title'].split())[:45]}»: {qty} шт"
+            if used + len(line) > 4200:
+                lines.append(f"…ещё {min(len(rows), int(top)) - n} позиций не показано (уточните max_qty или top)")
+                break
+            lines.append(line)
+            used += len(line)
+        return "\n".join(lines)
+
+    async def propose(items=None, warehouse_id=None):
+        if store is None:
+            return "Изменения остатков недоступны: не настроен токен WB на запись (WB_WRITE_TOKEN)."
+        if isinstance(items, str):
+            try:
+                items = json.loads(items)
+            except ValueError:
+                pass
+        try:
+            aid, preview = await propose_stock_update(wb, store, items, warehouse_id)
+        except ProposalError as e:
+            return f"Ошибка: {e}. Предложение не создано, ничего не изменено."
+        return (f"Предложение #{aid} создано и показано владельцу с кнопками подтверждения. "
+                f"ПОКА НИЧЕГО НЕ ИЗМЕНЕНО: нужно, чтобы владелец нажал ✅ в чате.\n{preview}")
+
     tools = [
         Tool("stocks", "остатки на складах WB: артикул, название и количество каждого товара (названия уже включены, cards для них вызывать не нужно). Аргументы: order='low' (сначала мало) или 'high', max_qty=число (показать только товары с остатком не больше этого числа, например 3 для «меньше 4 штук»), top=число строк (по умолчанию 25)", stocks),
         Tool("sales", "продажи и возвраты за период. Аргумент: days=число дней (по умолчанию 7, максимум 90)", sales),
         Tool("orders", "заказы и отмены за период. Аргумент: days=число дней (по умолчанию 7)", orders),
         Tool("prices", "текущие цены и скидки. Аргументы: search='часть артикула' (необязательно), top=число строк", prices),
         Tool("cards", "карточки товаров (название, бренд, категория). Аргументы: search='текст' (необязательно), top=число", cards),
+        Tool("fbs_warehouses", "склады продавца (FBS): номер и название", fbs_warehouses),
+        Tool("fbs_stocks", "текущие остатки на складе продавца (FBS) по всем товарам. Аргументы: max_qty=число (только товары с остатком не больше), top=число строк, warehouse_id (если складов несколько)", fbs_stocks),
+        Tool("propose_stock_update", "ПРЕДЛОЖИТЬ изменение остатков FBS (ничего не меняет, ждёт подтверждения владельца). Аргументы: items=[{\"article\": \"артикул\", \"amount\": новое количество}] (до 50 товаров; вместо article можно nm; size, если у товара несколько размеров), warehouse_id (если складов несколько)", propose),
         Tool("feedbacks", "последние отзывы покупателей без ответа. Аргумент: top=число (по умолчанию 10)", feedbacks),
     ]
     return Agent("wb", "Wildberries: остатки, продажи, заказы, цены, карточки товаров, отзывы (только чтение)", PROMPT, tools)

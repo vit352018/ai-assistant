@@ -19,6 +19,8 @@ class Config:
     cf_models: tuple
     tts_voice: str
     browser_enabled: bool = True
+    wb_write_token: str = ""  # токен WB с правом записи: только для исполнителя подтверждённых действий
+    data_dir: str = "/opt/assistant/data"
     cohere_key: str = ""
     cohere_models: tuple = COHERE_MODELS
     mistral_key: str = ""
@@ -49,6 +51,8 @@ def load():
         cf_models=tuple(m.strip() for m in models.split(",") if m.strip()),
         tts_voice=os.environ.get("TTS_VOICE", "ru-RU-DmitryNeural").strip(),
         browser_enabled=os.environ.get("BROWSER", "1").strip() != "0",
+        wb_write_token=os.environ.get("WB_WRITE_TOKEN", "").strip(),
+        data_dir=os.environ.get("DATA_DIR", "/opt/assistant/data").strip(),
         cohere_key=os.environ.get("COHERE_API_KEY", "").strip(),
         mistral_key=os.environ.get("MISTRAL_API_KEY", "").strip(),
         mistral_model=os.environ.get("MISTRAL_MODEL", "mistral-small-latest").strip(),

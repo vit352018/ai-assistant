@@ -1,17 +1,22 @@
 import logging
+import os
+import time
 
 import httpx
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import (Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters)
 
+from .actions import ActionStore
 from .config import load
 from .jsonutil import split_message
 from .llm import LLMError, LLMRouter, Provider
 from .browser import Browser
 from .browser_agent import build as build_browser_agent
 from .orchestrator import Orchestrator
+from .stock_actions import KIND as STOCK_KIND, execute_stock_update
 from .voice import speak_via_worker, synthesize, transcribe_telegram, wants_voice
 from .wb import WB
+from .wb_write import WBWriter
 from .wb_agent import build as build_wb_agent
 
 log = logging.getLogger("bot")
@@ -32,11 +37,14 @@ async def post_init(app):
         providers.append(Provider("sambanova", f"{h['sambanova']}/v1", cfg.sambanova_key, cfg.sambanova_model))
     llm = LLMRouter(client, providers)
     wb = WB(client, cfg.wb_token)
-    agents, browser = [build_wb_agent(wb)], None
+    os.makedirs(cfg.data_dir, exist_ok=True)
+    store = ActionStore(os.path.join(cfg.data_dir, "actions.db"))
+    writer = WBWriter(client, cfg.wb_write_token) if cfg.wb_write_token else None  # без токена записи изменений нет
+    agents, browser = [build_wb_agent(wb, store if writer else None)], None
     if cfg.browser_enabled:
         browser = Browser()
         agents.append(build_browser_agent(browser))
-    app.bot_data.update(client=client, llm=llm, wb=wb, browser=browser, always_voice=False,
+    app.bot_data.update(client=client, llm=llm, wb=wb, store=store, writer=writer, browser=browser, always_voice=False,
                         orch=Orchestrator(llm, agents))
 
 
@@ -51,7 +59,7 @@ async def post_shutdown(app):
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Привет! Я ваш помощник. Пишите или говорите голосом, например: «что с остатками?» или «продажи за неделю».\n"
-        "/check — проверить, что всё подключено\n/voicetest — проверить голосовой ответ\n"
+        "/check — проверить, что всё подключено\n/voicetest — проверить голосовой ответ\n/log — последние изменения в WB\n"
         "Чтобы получить ответ голосом, добавьте в вопрос «ответь голосом» или «озвучь».\n/voice — отвечать голосом всегда (повторно — выключить)"
     )
 
@@ -79,6 +87,13 @@ async def check(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         lines.append(f"✅ WB: магазин «{await d['wb'].seller()}»")
     except Exception as e:  # noqa: BLE001
         lines.append(f"❌ WB: {e}")
+    if d.get("writer"):
+        try:
+            lines.append(f"✅ WB запись: токен принят, магазин «{await d['writer'].seller()}» (изменения только по кнопке ✅)")
+        except Exception as e:  # noqa: BLE001
+            lines.append(f"❌ WB запись: {e}")
+    else:
+        lines.append("ℹ️ WB запись: токен не задан (WB_WRITE_TOKEN), бот может только читать")
     if d.get("browser"):
         try:
             lines.append("✅ Браузер: " + await d["browser"].selftest())
@@ -90,6 +105,58 @@ async def check(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     except Exception as e:  # noqa: BLE001
         lines.append(f"❌ Голос: {e}")
     await update.message.reply_text("\n".join(lines))
+
+
+EXECUTORS = {STOCK_KIND: execute_stock_update}
+
+
+async def decide(store, writer, data):
+    """Нажатие кнопки: ok:<id> выполняет предложение (один раз), no:<id> отменяет. Возвращает текст для чата."""
+    verb, aid = data.split(":", 1)
+    if verb == "no":
+        return "❌ Отменено. Ничего не изменено." if store.cancel(aid) else "Это предложение уже обработано или истекло."
+    if writer is None:
+        return "Токен WB на запись не настроен, выполнить нельзя."
+    claimed = store.claim(aid)
+    if not claimed:
+        return "Предложение уже выполнено, отменено или истекло (оно действует 10 минут). Попросите заново."
+    kind, payload = claimed
+    try:
+        ok, text = await EXECUTORS[kind](writer, payload)
+    except Exception as e:  # noqa: BLE001
+        log.exception("action failed")
+        ok, text = False, (f"❌ Ошибка при выполнении: {type(e).__name__}: {e}\n"
+                           "Прежде чем повторять, проверьте остатки в кабинете WB: запрос мог дойти.")
+    store.finish(aid, ok, text)
+    return text
+
+
+async def on_action(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q, d = update.callback_query, ctx.application.bot_data
+    if q.from_user.id != cfg.owner_id:  # кнопки работают только у владельца
+        await q.answer("Нет доступа", show_alert=True)
+        return
+    await q.answer()
+    await q.edit_message_reply_markup(reply_markup=None)  # кнопки исчезают сразу: двойное нажатие невозможно
+    await q.message.reply_text(await decide(d["store"], d["writer"], q.data))
+
+
+async def send_proposals(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Предложения, созданные при обработке сообщения, показываем с кнопками подтверждения."""
+    store = ctx.application.bot_data["store"]
+    for aid in store.pop_new():
+        a = store.get(aid)
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("✅ Выполнить", callback_data=f"ok:{aid}"),
+                                    InlineKeyboardButton("❌ Отмена", callback_data=f"no:{aid}")]])
+        await update.message.reply_text(
+            f"🛠 Предложение #{aid}\n{a['preview']}\n\nДействует 10 минут. Пока вы не нажмёте ✅, ничего не изменится.",
+            reply_markup=kb)
+
+
+async def log_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    rows = ctx.application.bot_data["store"].recent(10)
+    lines = [f"{time.strftime('%d.%m %H:%M', time.localtime(r['created']))} #{r['id']} {r['status']}" for r in rows]
+    await update.message.reply_text("Последние действия:\n" + "\n".join(lines) if lines else "Действий пока не было.")
 
 
 async def respond(update: Update, ctx: ContextTypes.DEFAULT_TYPE, text, voice_in):
@@ -106,6 +173,7 @@ async def respond(update: Update, ctx: ContextTypes.DEFAULT_TYPE, text, voice_in
         answer = f"⚠️ Не получилось: {type(e).__name__}: {e}"
     for part in split_message(answer):
         await update.message.reply_text(part)
+    await send_proposals(update, ctx)
     if d["always_voice"] or wants_voice(text):  # голос — только по просьбе (или если включён /voice)
         try:
             await speak_via_worker(d["client"], cfg.hosts()["ai"], cfg.bot_token, update.effective_chat.id,
@@ -155,6 +223,8 @@ def main():
     app.add_handler(CommandHandler("check", check, filters=owner))
     app.add_handler(CommandHandler("voicetest", voicetest, filters=owner))
     app.add_handler(CommandHandler("voice", voice_toggle, filters=owner))
+    app.add_handler(CommandHandler("log", log_command, filters=owner))
+    app.add_handler(CallbackQueryHandler(on_action, pattern=r"^(ok|no):[0-9a-f]{8}$"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & owner, on_text))
     app.add_handler(MessageHandler(filters.VOICE & owner, on_voice))
     app.add_error_handler(on_error)

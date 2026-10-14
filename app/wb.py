@@ -8,6 +8,7 @@ HOSTS = {
     "feedbacks": "https://feedbacks-api.wildberries.ru",
     "common": "https://common-api.wildberries.ru",
     "analytics": "https://seller-analytics-api.wildberries.ru",
+    "marketplace": "https://marketplace-api.wildberries.ru",
 }
 
 
@@ -16,7 +17,8 @@ class WBError(Exception):
 
 
 class WB:
-    """Тонкий клиент WB API. Только чтение: методов, меняющих данные, здесь нет."""
+    """Тонкий клиент WB API для токена на чтение. Методов, меняющих данные, здесь нет:
+    POST используется только там, где WB так устроил чтение (список карточек, остатки склада)."""
 
     def __init__(self, client, token):
         self.client = client
@@ -50,7 +52,7 @@ class WB:
             raise WBError("лимит запросов WB (429), повторите через минуту")
         if r.status_code >= 400:
             raise WBError(f"WB вернул {r.status_code}: {r.text[:150]}")
-        data = r.json()
+        data = r.json() if r.content else {}  # успешный PUT возвращает 204 без тела
         if ttl:
             self._cache[key] = (time.time(), data)
         return data
@@ -64,14 +66,33 @@ class WB:
             body = {"settings": {"sort": {"ascending": False}, "filter": {"withPhoto": -1}, "cursor": cursor}}
             data = await self.post_read("content", "/content/v2/get/cards/list", body, {"locale": "ru"})
             for c in data.get("cards", []):
+                sizes = [{"chrtId": s.get("chrtID", s.get("chrtId")), "techSize": str(s.get("techSize") or "")}
+                         for s in c.get("sizes") or [] if s.get("chrtID", s.get("chrtId")) is not None]
                 names[c.get("nmID")] = {"vendorCode": c.get("vendorCode") or "", "title": c.get("title") or "",
-                                        "brand": c.get("brand") or ""}
+                                        "brand": c.get("brand") or "", "sizes": sizes}
             cur = data.get("cursor") or {}
             if cur.get("total", 0) < cursor["limit"]:
                 break
             cursor = {"limit": 100, "updatedAt": cur.get("updatedAt"), "nmID": cur.get("nmID")}
         self._catalog = (time.time(), names)
         return names
+
+    async def warehouses(self):
+        """Склады продавца (FBS): [{id, name, ...}]."""
+        data = await self.get("marketplace", "/api/v3/warehouses", ttl=300)
+        return data if isinstance(data, list) else []
+
+    async def fbs_stocks(self, warehouse_id, chrt_ids):
+        """Остатки на складе продавца по ID размеров (chrtId, до 1000 за запрос): {chrtId: количество}."""
+        out = {}
+        ids = list(chrt_ids)
+        for i in range(0, len(ids), 1000):
+            data = await self.post_read("marketplace", f"/api/v3/stocks/{int(warehouse_id)}", {"chrtIds": ids[i:i + 1000]})
+            for s in (data.get("stocks") if isinstance(data, dict) else None) or []:
+                cid = s.get("chrtId", s.get("chrtID"))
+                if cid is not None:
+                    out[cid] = s.get("amount", 0)
+        return out
 
     async def seller(self):
         data = await self.get("common", "/api/v1/seller-info", ttl=60)

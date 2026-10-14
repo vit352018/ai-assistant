@@ -720,3 +720,224 @@ def test_articles_with_newlines_are_cleaned():
             {"nmId": 5, "vendorCode": "АБВ\n", "quantity": 1}]
     assert "4656760334105: 1 шт" in agg_sales(rows[:1], "2026-10-01")
     assert "АБВ (nm 5): 1 шт" in agg_stocks(rows[1:])
+
+
+# ---------- этап 2: изменение остатков FBS только по подтверждению ----------
+import json as _js  # noqa: E402
+from app import bot as botmod  # noqa: E402
+from app import stock_actions as sa  # noqa: E402
+from app.actions import ActionStore  # noqa: E402
+from app.wb_write import WBWriter  # noqa: E402
+
+CARDS = {"cards": [
+    {"nmID": 100, "vendorCode": "A-1", "title": "Щит 1", "brand": "Б", "sizes": [{"chrtID": 1001, "techSize": "0"}]},
+    {"nmID": 200, "vendorCode": "B-2", "title": "Плинтус 2", "brand": "Б",
+     "sizes": [{"chrtID": 2001, "techSize": "S"}, {"chrtID": 2002, "techSize": "M"}]}],
+    "cursor": {"total": 2}}
+
+
+class FakeWB:
+    """Подставной WB: хранит остатки, считает запросы на запись, проверяет токены."""
+
+    def __init__(self, warehouses=None, noop=False, put_status=204):
+        self.fbs = {1001: 0, 2001: 5, 2002: 7}
+        self.puts, self.noop, self.put_status = [], noop, put_status
+        self.warehouses = [{"id": 7, "name": "Мой склад"}] if warehouses is None else warehouses
+
+    def __call__(self, req):
+        p = req.url.path
+        if p == "/content/v2/get/cards/list":
+            return httpx.Response(200, json=CARDS)
+        if p == "/api/v3/warehouses":
+            return httpx.Response(200, json=self.warehouses)
+        if p.startswith("/api/v3/stocks/") and req.method == "POST":
+            ids = _js.loads(req.content)["chrtIds"]
+            return httpx.Response(200, json={"stocks": [{"chrtId": i, "amount": self.fbs[i]} for i in ids if i in self.fbs]})
+        if p.startswith("/api/v3/stocks/") and req.method == "PUT":
+            self.puts.append((req.headers["authorization"], _js.loads(req.content)))
+            if self.put_status >= 400:
+                return httpx.Response(self.put_status, json={"error": "bad"})
+            if not self.noop:
+                for s in _js.loads(req.content)["stocks"]:
+                    self.fbs[s["chrtId"]] = s["amount"]
+            return httpx.Response(204)
+        return httpx.Response(404)
+
+
+def stage2(api=None):
+    api = api or FakeWB()
+    client = httpx.AsyncClient(transport=httpx.MockTransport(api))
+    return api, WB(client, "READ"), WBWriter(client, "WRITE"), ActionStore()
+
+
+def test_store_claims_once_expires_and_cancels():
+    st = ActionStore()
+    a = st.create("k", {"x": 1}, "превью")
+    assert st.pop_new() == [a] and st.pop_new() == []
+    assert st.claim(a) == ("k", {"x": 1}) and st.claim(a) is None  # выполнить можно только один раз
+    st.finish(a, True, "ok")
+    assert st.get(a)["status"] == "done" and st.recent(5)[0]["id"] == a
+    old = ActionStore(ttl=-1)
+    b = old.create("k", {}, "p")
+    assert old.claim(b) is None and old.get(b)["status"] == "expired"
+    c = st.create("k", {}, "p")
+    assert st.cancel(c) and st.claim(c) is None and not st.cancel(c)
+
+
+def test_propose_changes_nothing_and_shows_old_and_new():
+    async def go():
+        api, wb, _, st = stage2()
+        aid, preview = await sa.propose_stock_update(wb, st, [{"article": "a-1", "amount": 20}])
+        assert "A-1 «Щит 1»: 0 → 20 шт" in preview and "Мой склад" in preview
+        assert api.puts == [] and api.fbs[1001] == 0  # ничего не записано
+        a = st.get(aid)
+        assert a["status"] == "pending" and a["payload"]["items"][0]["chrtId"] == 1001 and a["payload"]["warehouse_id"] == 7
+    run(go())
+
+
+def test_propose_validation_errors():
+    async def bad(items, warehouses=None, wid=None):
+        api, wb, _, st = stage2(FakeWB(warehouses=warehouses))
+        with pytest.raises(sa.ProposalError) as e:
+            await sa.propose_stock_update(wb, st, items, wid)
+        assert api.puts == [] and st.recent(5) == []
+        return str(e.value)
+
+    async def go():
+        assert "не найден в каталоге" in await bad([{"article": "НЕТ", "amount": 1}])
+        for wrong in (-1, True, 2.5, "много", None, 10**9):
+            assert "не подходит" in await bad([{"article": "A-1", "amount": wrong}]), wrong
+        assert "размеры: S, M" in await bad([{"article": "B-2", "amount": 1}])
+        assert "указан дважды" in await bad([{"article": "A-1", "amount": 1}, {"nm": 100, "amount": 2}])
+        assert "не больше 50" in await bad([{"article": "A-1", "amount": 1}] * 51)
+        assert "непустой список" in await bad([])
+        two = [{"id": 7, "name": "Один"}, {"id": 8, "name": "Два"}]
+        assert "нужно указать склад" in await bad([{"article": "A-1", "amount": 1}], warehouses=two)
+        assert "склад 99 не найден" in await bad([{"article": "A-1", "amount": 1}], warehouses=two, wid=99)
+        # размер указан — всё в порядке, склад выбран явно
+        api, wb, _, st = stage2(FakeWB(warehouses=two))
+        aid, preview = await sa.propose_stock_update(wb, st, [{"article": "B-2", "size": "M", "amount": 9}], 8)
+        assert "7 → 9 шт" in preview and st.get(aid)["payload"]["items"][0]["chrtId"] == 2002
+    run(go())
+
+
+def test_propose_warns_about_suspicious_numbers():
+    async def go():
+        _, wb, _, st = stage2()
+        _, preview = await sa.propose_stock_update(wb, st, [{"article": "A-1", "amount": 1200}])
+        assert preview.count("⚠️") == 2  # и большой скачок, и очень большое число
+    run(go())
+
+
+def test_execute_sends_exact_body_with_write_token_and_verifies():
+    async def go():
+        api, wb, writer, st = stage2()
+        aid, _ = await sa.propose_stock_update(wb, st, [{"article": "A-1", "amount": 20}, {"nm": 200, "size": "S", "amount": 0}])
+        kind, payload = st.claim(aid)
+        ok, text = await sa.execute_stock_update(writer, payload)
+        assert ok and "проверено: 2 из 2" in text
+        assert api.puts == [("WRITE", {"stocks": [{"chrtId": 1001, "amount": 20}, {"chrtId": 2001, "amount": 0}]})]
+    run(go())
+
+
+def test_execute_detects_silent_204_that_changed_nothing(monkeypatch):
+    async def fast(_): pass
+    monkeypatch.setattr(sa.asyncio, "sleep", fast)
+
+    async def go():
+        api, wb, writer, st = stage2(FakeWB(noop=True))  # WB «принял» запрос (204), но ничего не изменил
+        aid, _ = await sa.propose_stock_update(wb, st, [{"article": "A-1", "amount": 20}])
+        ok, text = await sa.execute_stock_update(writer, st.claim(aid)[1])
+        assert not ok and "не совпали" in text and "ожидалось 20, у WB сейчас 0" in text
+    run(go())
+
+
+def test_button_executes_once_and_cancel_executes_nothing():
+    async def go():
+        api, wb, writer, st = stage2()
+        a1, _ = await sa.propose_stock_update(wb, st, [{"article": "A-1", "amount": 20}])
+        first = await botmod.decide(st, writer, f"ok:{a1}")
+        second = await botmod.decide(st, writer, f"ok:{a1}")  # повторное нажатие
+        assert "проверено" in first and "уже выполнено" in second and len(api.puts) == 1
+        a2, _ = await sa.propose_stock_update(wb, st, [{"article": "A-1", "amount": 30}])
+        assert "Отменено" in await botmod.decide(st, writer, f"no:{a2}")
+        assert "истекло" in await botmod.decide(st, writer, f"ok:{a2}") and len(api.puts) == 1
+        assert api.fbs[1001] == 20 and st.get(a1)["status"] == "done" and st.get(a2)["status"] == "cancelled"
+        assert "не настроен" in await botmod.decide(st, None, f"ok:{a2}")
+    run(go())
+
+
+def test_wb_error_on_write_is_reported_and_logged():
+    async def go():
+        api, wb, writer, st = stage2(FakeWB(put_status=400))
+        aid, _ = await sa.propose_stock_update(wb, st, [{"article": "A-1", "amount": 20}])
+        text = await botmod.decide(st, writer, f"ok:{aid}")
+        assert "Ошибка при выполнении" in text and "проверьте остатки в кабинете" in text
+        assert st.get(aid)["status"] == "failed"
+    run(go())
+
+
+def test_only_owner_can_press_buttons_and_buttons_vanish():
+    class Msg:
+        def __init__(self): self.sent = []
+        async def reply_text(self, text, reply_markup=None): self.sent.append((text, reply_markup))
+
+    class Q:
+        def __init__(self, uid, data):
+            self.from_user, self.data, self.message, self.calls = types.SimpleNamespace(id=uid), data, Msg(), []
+        async def answer(self, text=None, show_alert=False): self.calls.append(("answer", text))
+        async def edit_message_reply_markup(self, reply_markup=None): self.calls.append(("markup", reply_markup))
+
+    async def go():
+        api, wb, writer, st = stage2()
+        aid, _ = await sa.propose_stock_update(wb, st, [{"article": "A-1", "amount": 20}])
+        botmod.cfg = types.SimpleNamespace(owner_id=1)
+        ctx = types.SimpleNamespace(application=types.SimpleNamespace(bot_data={"store": st, "writer": writer}))
+        stranger = Q(2, f"ok:{aid}")
+        await botmod.on_action(types.SimpleNamespace(callback_query=stranger), ctx)
+        assert api.puts == [] and st.get(aid)["status"] == "pending" and stranger.message.sent == []
+        owner = Q(1, f"ok:{aid}")
+        await botmod.on_action(types.SimpleNamespace(callback_query=owner), ctx)
+        assert ("markup", None) in owner.calls and len(api.puts) == 1 and "проверено" in owner.message.sent[0][0]
+    run(go())
+
+
+def test_proposal_is_shown_with_two_buttons():
+    class Msg:
+        def __init__(self): self.sent = []
+        async def reply_text(self, text, reply_markup=None): self.sent.append((text, reply_markup))
+
+    async def go():
+        _, wb, _, st = stage2()
+        aid, _ = await sa.propose_stock_update(wb, st, [{"article": "A-1", "amount": 20}])
+        msg = Msg()
+        ctx = types.SimpleNamespace(application=types.SimpleNamespace(bot_data={"store": st}))
+        await botmod.send_proposals(types.SimpleNamespace(message=msg), ctx)
+        text, kb = msg.sent[0]
+        assert "ничего не изменится" in text and "0 → 20 шт" in text
+        assert [b.callback_data for b in kb.inline_keyboard[0]] == [f"ok:{aid}", f"no:{aid}"]
+        await botmod.send_proposals(types.SimpleNamespace(message=msg), ctx)
+        assert len(msg.sent) == 1  # второй раз не показываем
+    run(go())
+
+
+def test_agent_tools_propose_without_executing_and_need_write_token():
+    async def go():
+        api, wb, _, st = stage2()
+        with_store = {t.name: t.fn for t in wb_agent.build(wb, st).tools}
+        out = await with_store["propose_stock_update"](items=[{"article": "A-1", "amount": 5}])
+        assert "ПОКА НИЧЕГО НЕ ИЗМЕНЕНО" in out and api.puts == [] and len(st.new_ids) == 1
+        out = await with_store["propose_stock_update"](items='[{"article": "НЕТ", "amount": 5}]')
+        assert "Предложение не создано" in out and len(st.new_ids) == 1
+        assert "A-1 «Щит 1»: 0 шт" in await with_store["fbs_stocks"](max_qty=0)
+        assert "7: Мой склад" in await with_store["fbs_warehouses"]()
+        no_store = {t.name: t.fn for t in wb_agent.build(wb, None).tools}
+        assert "WB_WRITE_TOKEN" in await no_store["propose_stock_update"](items=[{"article": "A-1", "amount": 5}])
+    run(go())
+
+
+def test_model_can_never_reach_the_write_client():
+    # инструменты агента получают только клиента на чтение и хранилище предложений
+    import inspect
+    assert "writer" not in inspect.signature(wb_agent.build).parameters
+    assert not hasattr(WB, "update_stocks") and hasattr(WBWriter, "update_stocks")
