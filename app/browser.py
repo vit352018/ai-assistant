@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import ipaddress
 import logging
 import re
@@ -42,6 +43,17 @@ ELEMENTS_JS = """() => {
 
 SEARCH_JS = """() => [...document.querySelectorAll('.result')].slice(0, 8).map(r => {
   const a = r.querySelector('a.result__a'), s = r.querySelector('.result__snippet');
+  return {t: a ? a.innerText : '', h: a ? a.href : '', s: s ? s.innerText : ''};
+}).filter(x => x.h)"""
+
+
+BING_JS = """() => [...document.querySelectorAll('li.b_algo')].slice(0, 8).map(r => {
+  const a = r.querySelector('h2 a'), s = r.querySelector('.b_caption p, p');
+  return {t: a ? a.innerText : '', h: a ? a.href : '', s: s ? s.innerText : ''};
+}).filter(x => x.h)"""
+
+MOJEEK_JS = """() => [...document.querySelectorAll('ul.results-standard > li')].slice(0, 8).map(r => {
+  const a = r.querySelector('a.title'), s = r.querySelector('p.s');
   return {t: a ? a.innerText : '', h: a ? a.href : '', s: s ? s.innerText : ''};
 }).filter(x => x.h)"""
 
@@ -110,6 +122,25 @@ def type_block_reason(it, submit):
 
 def decode_ddg(href):
     return parse_qs(urlparse(href).query).get("uddg", [href])[0]
+
+
+def decode_bing(href):
+    """Bing прячет адрес в параметре u=a1<base64url>; если не получилось — возвращаем ссылку как есть."""
+    u = parse_qs(urlparse(href).query).get("u", [""])[0]
+    if u.startswith("a1"):
+        try:
+            return base64.urlsafe_b64decode(u[2:] + "=" * (-len(u[2:]) % 4)).decode()
+        except (ValueError, UnicodeDecodeError):
+            pass
+    return href
+
+
+# (название, адрес поиска, скрипт разбора выдачи, как достать настоящий адрес из ссылки)
+SEARCH_ENGINES = (
+    ("DuckDuckGo", "https://html.duckduckgo.com/html/?q=", SEARCH_JS, decode_ddg),
+    ("Bing", "https://www.bing.com/search?setlang=ru&q=", BING_JS, decode_bing),
+    ("Mojeek", "https://www.mojeek.com/search?q=", MOJEEK_JS, lambda h: h),
+)
 
 
 def clean_text(text):
@@ -265,13 +296,28 @@ class Browser:
             return await self._summary(max(0, int(offset)))
 
     async def search(self, query):
+        """Поиск в интернете: пробуем поисковики по очереди; если выдачи нет (проверка на робота и т.п.), говорим почему."""
+        notes = []
         async with self._lock:
-            await self._goto("https://html.duckduckgo.com/html/?q=" + quote_plus(str(query)))
-            rows = await self._page.evaluate(SEARCH_JS)
+            for name, url, js, decode in SEARCH_ENGINES:
+                try:
+                    await self._goto(url + quote_plus(str(query)))
+                    rows = await self._page.evaluate(js)
+                    title = await self._page.title()
+                    body = ""
+                    if not rows:
+                        body = clean_text(await self._page.inner_text("body"))[:120].replace("\n", " ")
+                except BrowserError as e:
+                    notes.append(f"{name}: {e}")
+                    continue
+                if rows:
+                    self._touch()
+                    return f"Результаты ({name}):\n" + "\n".join(
+                        f"{i}. {r['t']}\n   {decode(r['h'])}\n   {r['s'][:200]}" for i, r in enumerate(rows, 1))
+                notes.append(f"{name}: выдачи нет (страница «{title}»: {body})")
             self._touch()
-        if not rows:
-            return "Поиск ничего не вернул (возможно, поисковик показал проверку на робота). Откройте нужный сайт напрямую."
-        return "\n".join(f"{i}. {r['t']}\n   {decode_ddg(r['h'])}\n   {r['s'][:200]}" for i, r in enumerate(rows, 1))
+        return ("Поиск ничего не вернул ни в одном поисковике, возможно, они показали проверку на робота. "
+                "Откройте нужный сайт напрямую.\n" + "\n".join(notes))
 
     async def elements(self):
         async with self._lock:

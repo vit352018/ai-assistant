@@ -430,8 +430,10 @@ def test_browser_search_formats_results():
         b._page.els = [{"t": "Кружки", "h": "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fshop.ru%2F", "s": "Купить кружки"}]
         out = await b.search("кружка")
         assert "1. Кружки" in out and "https://shop.ru/" in out
+        assert out.startswith("Результаты (DuckDuckGo)")
         b._page.els = []
-        assert "ничего не вернул" in await b.search("x")
+        empty = await b.search("x")
+        assert "ничего не вернул" in empty and all(n in empty for n in ("DuckDuckGo:", "Bing:", "Mojeek:")) and "«Тест»" in empty
     run(go())
 
 
@@ -941,3 +943,28 @@ def test_model_can_never_reach_the_write_client():
     import inspect
     assert "writer" not in inspect.signature(wb_agent.build).parameters
     assert not hasattr(WB, "update_stocks") and hasattr(WBWriter, "update_stocks")
+
+
+def test_search_falls_back_to_next_engine_and_decodes_bing_links():
+    import base64 as b64
+    target = "https://shop.ru/p?id=1"
+    enc = "a1" + b64.urlsafe_b64encode(target.encode()).decode().rstrip("=")
+    assert br.decode_bing(f"https://www.bing.com/ck/a?!&&p=x&u={enc}&ntb=1") == target
+    assert br.decode_bing("https://example.com/") == "https://example.com/"
+
+    async def go():
+        b = fake_browser()
+        visited = []
+        orig = b._page.goto
+
+        async def goto(url, **kw):
+            visited.append(url.split("/")[2])
+            return await orig(url, **kw)
+
+        async def evaluate(js):  # первый поисковик «не вернул ничего», второй (Bing) — вернул
+            return [] if len(visited) == 1 else [{"t": "Магазин", "h": f"https://www.bing.com/ck/a?u={enc}", "s": "описание"}]
+        b._page.goto, b._page.evaluate = goto, evaluate
+        out = await b.search("кружка")
+        assert visited == ["html.duckduckgo.com", "www.bing.com"]
+        assert out.startswith("Результаты (Bing)") and target in out
+    run(go())
