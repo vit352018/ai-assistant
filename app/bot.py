@@ -14,7 +14,7 @@ from .browser import Browser
 from .browser_agent import build as build_browser_agent
 from .orchestrator import Orchestrator
 from .stock_actions import KIND as STOCK_KIND, execute_stock_update
-from .voice import speak_via_worker, synthesize, transcribe_telegram, wants_voice
+from .voice import speak_via_worker, transcribe_telegram, wants_voice
 from .wb import WB
 from .wb_write import WBWriter
 from .wb_agent import build as build_wb_agent
@@ -99,11 +99,7 @@ async def check(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             lines.append("✅ Браузер: " + await d["browser"].selftest())
         except Exception as e:  # noqa: BLE001
             lines.append(f"❌ Браузер: {e}")
-    try:
-        ok = len(await synthesize("Проверка голоса", cfg.tts_voice)) > 0
-        lines.append("✅ Голос (синтез)" if ok else "❌ Голос: пустой результат")
-    except Exception as e:  # noqa: BLE001
-        lines.append(f"❌ Голос: {e}")
+    lines.append("ℹ️ Голосовой ответ проверяется командой /voicetest (озвучка идёт через Worker, а не с сервера)")
     await update.message.reply_text("\n".join(lines))
 
 

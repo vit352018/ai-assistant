@@ -79,17 +79,3 @@ async def speak_via_worker(client, ai_base, bot_token, chat_id, text, voice, rep
         last = f"HTTP {r.status_code}: {r.text[:200]}"
         break
     raise RuntimeError(last)
-
-
-async def synthesize(text, voice):
-    """Текст -> голос (mp3) через edge-tts. Telegram принимает mp3 как голосовое."""
-    import edge_tts
-
-    speech = clean_for_speech(text)
-    if not speech:
-        return b""
-    buf = bytearray()
-    async for chunk in edge_tts.Communicate(speech, voice).stream():
-        if chunk["type"] == "audio":
-            buf += chunk["data"]
-    return bytes(buf)
