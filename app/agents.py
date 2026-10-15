@@ -1,11 +1,13 @@
 import datetime as dt
 import json
+import logging
 import re
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable
 
 from .jsonutil import extract_json
 
+log = logging.getLogger("agent")
 MSK = dt.timezone(dt.timedelta(hours=3))
 MAX_TOOL_CHARS = 4600
 
@@ -93,6 +95,7 @@ async def run_agent(llm, agent, task, max_steps=None):
         seen.add(key)
         tool = tools.get(name)
         called.add(name)
+        log.info("%s вызывает %s %s", agent.name, name, str(args)[:200])
         if tool is None:
             result = f"Ошибка: нет инструмента {name}. Доступны: {', '.join(tools)}"
         else:

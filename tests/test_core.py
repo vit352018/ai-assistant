@@ -1063,3 +1063,20 @@ def test_fbs_stocks_distinguishes_zero_from_no_record_and_describes_max_qty():
         desc = next(t.description for t in agent.tools if t.name == "fbs_stocks")
         assert "max_qty=5" in desc and "а не top" in desc
     run(go())
+
+
+def test_question_about_proposal_is_not_nudged_and_agent_sees_literal_request():
+    from app.wb_agent import verify_stock
+    assert verify_stock("Уточните, пожалуйста, артикул и новое количество для предложения по остаткам.", set()) is None
+    assert verify_stock("Какое количество указать в предложении?", set()) is None
+    assert verify_stock("Предложение подготовлено, нажмите ✅.", set())
+    assert verify_stock("Предложение подготовлено.", {"propose_stock_update"}) is None
+    agent = Agent("wb", "магазин", "x", [])
+    llm = FakeLLM(['{"agent": "wb", "task": "посмотреть остатки"}', '{"final": "Вот остатки"}'])
+    run(Orchestrator(llm, [agent]).handle("покажи остатки FBS не больше 5 штук"))
+    assert "Дословная просьба владельца: «покажи остатки FBS не больше 5 штук»" in llm.seen[1][-1]["content"]
+
+
+def test_prompt_separates_reading_from_changing():
+    from app.wb_agent import PROMPT
+    assert "это ЧТЕНИЕ: вызови fbs_stocks" in PROMPT and "max_qty=N" in PROMPT and "«установи" in PROMPT

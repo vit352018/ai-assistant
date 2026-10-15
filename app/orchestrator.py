@@ -1,7 +1,10 @@
 import collections
+import logging
 
 from .agents import run_agent, today
 from .jsonutil import extract_json
+
+log = logging.getLogger("orchestrator")
 
 ROUTER = """Ты — оркестратор личного ИИ-помощника владельца. Сегодня {today}.
 Агенты-специалисты:
@@ -45,7 +48,8 @@ class Orchestrator:
         elif data and "tool" in data:  # модель сразу вызвала инструмент — отдаём задачу агенту, у которого он есть
             agent = next((a for a in self.agents.values() if any(t.name == data["tool"] for t in a.tools)), None)
         if agent:
-            answer = await run_agent(self.llm, agent, f"{ctx}Задача: {task}")
+            log.info("маршрут: агент=%s, задача=%r, дословно=%r", agent.name, str(task)[:200], text[:200])
+            answer = await run_agent(self.llm, agent, f"{ctx}Задача от оркестратора: {task}\nДословная просьба владельца: «{text}»")
         elif data and "answer" in data:
             answer = str(data["answer"])
         elif data:
