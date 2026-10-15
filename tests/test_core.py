@@ -980,3 +980,9 @@ def test_router_sends_stock_change_to_wb_agent_and_describes_capabilities():
     agent = Agent("wb", desc, "x", [])
     o = Orchestrator(llm, [agent])
     assert run(o.handle("установи остаток артикула X равным 20")) == "Предложение создано"
+
+
+def test_agent_never_asks_for_current_stock():
+    from app.wb_agent import PROMPT
+    assert "Никогда не проси владельца сообщить текущий остаток" in PROMPT
+    assert "Для предложения нужны только" in PROMPT
