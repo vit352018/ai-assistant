@@ -92,8 +92,10 @@ async def propose_stock_update(wb, store, items, warehouse_id=None):
     lines, warns = [], []
     for r in rows:
         r["old"] = current.get(r["chrtId"])
-        old = "?" if r["old"] is None else r["old"]
+        old = "нет данных" if r["old"] is None else r["old"]
         lines.append(f"• {r['label']}: {old} → {r['amount']} шт")
+        if r["old"] is None:
+            warns.append(f"⚠️ {r['label']}: WB не вернул текущий остаток — прежнее значение неизвестно, откатить автоматически не получится")
         if r["old"] is not None and r["amount"] - r["old"] > BIG_JUMP:
             warns.append(f"⚠️ {r['label']}: увеличение на {r['amount'] - r['old']} шт — проверьте число")
         if r["amount"] >= 1000:

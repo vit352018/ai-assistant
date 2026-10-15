@@ -1039,3 +1039,14 @@ def test_no_nudge_when_tool_was_called_or_no_claim():
     llm = FakeLLM(['{"tool": "propose_stock_update", "args": {"items": [{"article": "A-1", "amount": 20}]}}',
                    '{"final": "Предложение подготовлено."}'])
     assert run(run_agent(llm, agent, "?")) == "Предложение подготовлено." and len(st.new_ids) == 1
+
+
+def test_preview_warns_when_wb_returns_no_current_stock():
+    async def go():
+        api, wb, _, st = stage2()
+        del api.fbs[1001]  # у позиции нет записи об остатке
+        aid, preview = await sa.propose_stock_update(wb, st, [{"article": "A-1", "amount": 6}])
+        assert "нет данных → 6 шт" in preview and "прежнее значение неизвестно" in preview
+        tools = {t.name: t.fn for t in wb_agent.build(wb, st).tools}
+        assert "WB остаток не вернул" in await tools["fbs_stocks"]()
+    run(go())

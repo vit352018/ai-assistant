@@ -103,7 +103,11 @@ def build(wb: WB, store=None) -> Agent:
         rows = sorted(((amounts.get(cid, 0), nm, c) for cid, (nm, c) in by_chrt.items()), key=lambda r: r[0])
         if max_qty not in (None, ""):
             rows = [r for r in rows if r[0] <= int(max_qty)]
-        lines, used = [f"Склад «{wh.get('name')}» (id {wh['id']}): подходит позиций {len(rows)}"], 0
+        missing = sum(1 for cid in by_chrt if cid not in amounts)
+        head = f"Склад «{wh.get('name')}» (id {wh['id']}): подходит позиций {len(rows)}"
+        if missing:
+            head += f"; по {missing} из {len(by_chrt)} позиций WB остаток не вернул (считаю 0)"
+        lines, used = [head], 0
         for n, (qty, nm, c) in enumerate(rows[: int(top)]):
             line = f"{' '.join(c['vendorCode'].split())} «{' '.join(c['title'].split())[:45]}»: {qty} шт"
             if used + len(line) > 4200:
