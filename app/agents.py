@@ -29,6 +29,7 @@ class Agent:
     prompt: str
     tools: list = field(default_factory=list)
     max_steps: int = 5
+    verify: object = None  # необязательно: verify(answer, called_tools) -> текст замечания или None
 
 
 def today():
@@ -68,11 +69,19 @@ async def run_agent(llm, agent, task, max_steps=None):
     system = f"{agent.prompt}\nСегодня {today()} (МСК).\n\nИнструменты:\n{tool_text}\n\n{PROTOCOL}"
     msgs = [{"role": "system", "content": system}, {"role": "user", "content": task}]
     seen, last_result = set(), ""
+    called, nudged = set(), False
     for _ in range(max_steps):
         reply = await llm.chat(msgs)
         data = extract_json(reply)
         if not data or "tool" not in data:
-            return _final(data, reply)
+            answer = _final(data, reply)
+            nudge = agent.verify(answer, called) if agent.verify and not nudged else None
+            if nudge:  # модель заявила о действии, которого не было — один раз просим сделать его по-настоящему
+                nudged = True
+                msgs.append({"role": "assistant", "content": reply})
+                msgs.append({"role": "user", "content": nudge})
+                continue
+            return answer
         name, args = data["tool"], data.get("args")
         args = args if isinstance(args, dict) else {}
         msgs.append({"role": "assistant", "content": reply})
@@ -83,6 +92,7 @@ async def run_agent(llm, agent, task, max_steps=None):
             break
         seen.add(key)
         tool = tools.get(name)
+        called.add(name)
         if tool is None:
             result = f"Ошибка: нет инструмента {name}. Доступны: {', '.join(tools)}"
         else:

@@ -1014,3 +1014,28 @@ def test_model_claiming_proposal_without_tool_is_called_out():
     assert any("НЕ создано" in x for x in fake)
     real = run(go("Предложение подготовлено", store_ids=True))
     assert not any("НЕ создано" in x for x in real)
+
+
+def test_agent_is_forced_to_call_propose_when_it_only_claims_it():
+    from app.wb_agent import build as build_wb
+    api, wb, _, st = stage2()
+    llm = FakeLLM([
+        '{"final": "Предложение подготовлено. Пока ничего не изменено."}',       # заявила, но не вызвала
+        '{"tool": "propose_stock_update", "args": {"items": [{"article": "A-1", "amount": 20}]}}',
+        '{"final": "Предложение создано, ждёт ✅"}',
+    ])
+    agent = build_wb(wb, st)
+    out = run(run_agent(llm, agent, "установи остаток A-1 равным 20"))
+    assert out == "Предложение создано, ждёт ✅" and len(st.new_ids) == 1 and api.puts == []
+    assert "НЕ вызывался" in llm.seen[1][-1]["content"]  # замечание действительно попало в диалог
+
+
+def test_no_nudge_when_tool_was_called_or_no_claim():
+    from app.wb_agent import build as build_wb
+    api, wb, _, st = stage2()
+    agent = build_wb(wb, st)
+    llm = FakeLLM(['{"final": "Остатков на складе нет."}'])
+    assert run(run_agent(llm, agent, "?")) == "Остатков на складе нет." and len(llm.seen) == 1
+    llm = FakeLLM(['{"tool": "propose_stock_update", "args": {"items": [{"article": "A-1", "amount": 20}]}}',
+                   '{"final": "Предложение подготовлено."}'])
+    assert run(run_agent(llm, agent, "?")) == "Предложение подготовлено." and len(st.new_ids) == 1

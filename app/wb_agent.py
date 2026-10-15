@@ -1,5 +1,6 @@
 import datetime as dt
 import json
+import re
 
 from .agents import Agent, Tool, today
 from .stock_actions import ProposalError, pick_warehouse, propose_stock_update
@@ -16,6 +17,19 @@ PROMPT = """Ты — WB-агент: аналитик магазина на Wildb
 - Цены, скидки и карточки пока менять нельзя — скажи об этом, если попросят.
 Для анализа: сначала получи данные, затем дай выводы: что важно, что заканчивается, что падает или растёт. Если данных не хватает — скажи, чего именно.
 Всегда называй общее число найденных позиций из ответа инструмента; если инструмент сообщил, что часть товаров не показана, скажи об этом и предложи показать остальные."""
+
+
+CLAIM_STOCK = re.compile(r"предложени\w*|подготовлен\w*|показан\w* с кнопк|кнопк", re.I)
+STOCK_NUDGE = ('Ты написал о подготовленном предложении, но инструмент propose_stock_update НЕ вызывался — '
+               'предложения нет, кнопок нет. Вызови его сейчас, одной строкой JSON, с артикулом и новым количеством '
+               'из запроса владельца: {"tool": "propose_stock_update", "args": {"items": [{"article": "...", "amount": N}]}}. '
+               'Не пиши ничего, кроме этого JSON.')
+
+
+def verify_stock(answer, called):
+    if CLAIM_STOCK.search(answer or "") and "propose_stock_update" not in called:
+        return STOCK_NUDGE
+    return None
 
 
 def build(wb: WB, store=None) -> Agent:
@@ -126,4 +140,4 @@ def build(wb: WB, store=None) -> Agent:
         Tool("feedbacks", "последние отзывы покупателей без ответа. Аргумент: top=число (по умолчанию 10)", feedbacks),
     ]
     return Agent("wb", "Wildberries: остатки и склад FBS (в том числе изменение остатков — через подтверждение владельца), "
-                       "продажи, заказы, цены, карточки товаров, отзывы", PROMPT, tools)
+                       "продажи, заказы, цены, карточки товаров, отзывы", PROMPT, tools, verify=verify_stock)
