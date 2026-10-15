@@ -986,3 +986,31 @@ def test_agent_never_asks_for_current_stock():
     from app.wb_agent import PROMPT
     assert "Никогда не проси владельца сообщить текущий остаток" in PROMPT
     assert "Для предложения нужны только" in PROMPT
+
+
+def test_model_claiming_proposal_without_tool_is_called_out():
+    import asyncio as _a
+    import types as _t
+    class M:
+        def __init__(self): self.sent = []; self.message_id = 1
+        async def reply_text(self, text, reply_markup=None): self.sent.append(text)
+    async def go(answer, store_ids):
+        st = ActionStore()
+        if store_ids:
+            st.create("k", {}, "p")
+        class L:
+            last_model = "m"
+            async def chat(self, *a, **k): return ""
+        orch = types.SimpleNamespace(handle=lambda text: _a.sleep(0, result=answer))
+        msg = M()
+        upd = _t.SimpleNamespace(message=msg, effective_chat=_t.SimpleNamespace(id=1))
+        ctx = _t.SimpleNamespace(bot=_t.SimpleNamespace(send_chat_action=lambda *a, **k: _a.sleep(0)),
+                                 application=_t.SimpleNamespace(bot_data={"orch": orch, "llm": L(), "store": st,
+                                                                         "client": None, "always_voice": False}))
+        botmod.cfg = _t.SimpleNamespace(owner_id=1, hosts=lambda: {"ai": ""}, tts_voice="v", bot_token="t")
+        await botmod.respond(upd, ctx, "x", voice_in=False)
+        return msg.sent
+    fake = run(go("Предложение #abc подготовлено", store_ids=False))
+    assert any("НЕ создано" in x for x in fake)
+    real = run(go("Предложение подготовлено", store_ids=True))
+    assert not any("НЕ создано" in x for x in real)

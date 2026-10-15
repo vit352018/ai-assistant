@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 import time
 
 import httpx
@@ -167,6 +168,10 @@ async def respond(update: Update, ctx: ContextTypes.DEFAULT_TYPE, text, voice_in
     except Exception as e:  # noqa: BLE001
         log.exception("handle failed")
         answer = f"⚠️ Не получилось: {type(e).__name__}: {e}"
+    store = d.get("store")
+    if store is not None and not store.new_ids and re.search(r"предложени\w*\s*#|предложение\s+подготовлено|кнопк", answer, re.I):
+        # модель написала про предложение, но инструмент его не создал: кнопок не будет — говорим прямо
+        answer += "\n\n⚠️ Предложение НЕ создано (кнопок нет, ничего не изменено). Повторите просьбу, например: «установи остаток артикула X равным N»."
     for part in split_message(answer):
         await update.message.reply_text(part)
     await send_proposals(update, ctx)
