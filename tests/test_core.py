@@ -968,3 +968,15 @@ def test_search_falls_back_to_next_engine_and_decodes_bing_links():
         assert visited == ["html.duckduckgo.com", "www.bing.com"]
         assert out.startswith("Результаты (Bing)") and target in out
     run(go())
+
+
+def test_router_sends_stock_change_to_wb_agent_and_describes_capabilities():
+    from app.wb_agent import build as build_wb
+    from app.orchestrator import ROUTER
+    desc = build_wb(FakeWB and make_wb(lambda r: httpx.Response(200, json={}))).description
+    assert "только чтение" not in desc and "изменение остатков" in desc
+    assert "Wildberries" in ROUTER and "не утверждай" in ROUTER.lower() or "Не утверждай" in ROUTER
+    llm = FakeLLM(['{"agent": "wb", "task": "установить остаток"}', '{"final": "Предложение создано"}'])
+    agent = Agent("wb", desc, "x", [])
+    o = Orchestrator(llm, [agent])
+    assert run(o.handle("установи остаток артикула X равным 20")) == "Предложение создано"
