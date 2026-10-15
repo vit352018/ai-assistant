@@ -95,23 +95,26 @@ def build(wb: WB, store=None) -> Agent:
         whs = await wb.warehouses()
         return "\n".join(f"{w.get('id')}: {w.get('name')}" for w in whs) or "Складов продавца нет."
 
-    async def fbs_stocks(top=30, max_qty=None, warehouse_id=None):
+    async def fbs_stocks(top=None, max_qty=None, warehouse_id=None):
         catalog = await wb.catalog()
         wh = await pick_warehouse(wb, warehouse_id)
         by_chrt = {sz["chrtId"]: (nm, c) for nm, c in catalog.items() for sz in c.get("sizes", [])}
         amounts = await wb.fbs_stocks(wh["id"], list(by_chrt))
-        rows = sorted(((amounts.get(cid, 0), nm, c) for cid, (nm, c) in by_chrt.items()), key=lambda r: r[0])
-        if max_qty not in (None, ""):
-            rows = [r for r in rows if r[0] <= int(max_qty)]
+        rows = sorted(((amounts.get(cid, 0), nm, c, cid in amounts) for cid, (nm, c) in by_chrt.items()),
+                      key=lambda r: (r[0], not r[3]))
+        limit = int(max_qty) if max_qty not in (None, "") else None
+        if limit is not None:
+            rows = [r for r in rows if r[0] <= limit]
+        top = int(top or (100 if limit is not None else 30))
         missing = sum(1 for cid in by_chrt if cid not in amounts)
         head = f"Склад «{wh.get('name')}» (id {wh['id']}): подходит позиций {len(rows)}"
         if missing:
             head += f"; по {missing} из {len(by_chrt)} позиций WB остаток не вернул (считаю 0)"
         lines, used = [head], 0
-        for n, (qty, nm, c) in enumerate(rows[: int(top)]):
-            line = f"{' '.join(c['vendorCode'].split())} «{' '.join(c['title'].split())[:45]}»: {qty} шт"
+        for n, (qty, nm, c, present) in enumerate(rows[:top]):
+            line = f"{' '.join(c['vendorCode'].split())} «{' '.join(c['title'].split())[:45]}»: " + (f"{qty} шт" if present else "нет записи об остатке")
             if used + len(line) > 4200:
-                lines.append(f"…ещё {min(len(rows), int(top)) - n} позиций не показано (уточните max_qty или top)")
+                lines.append(f"…ещё {min(len(rows), top) - n} позиций не показано (уточните max_qty или top)")
                 break
             lines.append(line)
             used += len(line)
@@ -139,7 +142,7 @@ def build(wb: WB, store=None) -> Agent:
         Tool("prices", "текущие цены и скидки. Аргументы: search='часть артикула' (необязательно), top=число строк", prices),
         Tool("cards", "карточки товаров (название, бренд, категория). Аргументы: search='текст' (необязательно), top=число", cards),
         Tool("fbs_warehouses", "склады продавца (FBS): номер и название", fbs_warehouses),
-        Tool("fbs_stocks", "текущие остатки на складе продавца (FBS) по всем товарам. Аргументы: max_qty=число (только товары с остатком не больше), top=число строк, warehouse_id (если складов несколько)", fbs_stocks),
+        Tool("fbs_stocks", "текущие остатки на складе продавца (FBS) по всем товарам. Аргументы: max_qty=число — оставить только товары с остатком НЕ БОЛЬШЕ этого числа (фраза «не больше 5 штук» = max_qty=5, а не top); top=сколько строк показать (по умолчанию 30, а при max_qty — 100); warehouse_id (если складов несколько)", fbs_stocks),
         Tool("propose_stock_update", "ПРЕДЛОЖИТЬ изменение остатков FBS (ничего не меняет, ждёт подтверждения владельца). Аргументы: items=[{\"article\": \"артикул\", \"amount\": новое количество}] (до 50 товаров; вместо article можно nm; size, если у товара несколько размеров), warehouse_id (если складов несколько)", propose),
         Tool("feedbacks", "последние отзывы покупателей без ответа. Аргумент: top=число (по умолчанию 10)", feedbacks),
     ]

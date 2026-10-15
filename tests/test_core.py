@@ -1050,3 +1050,16 @@ def test_preview_warns_when_wb_returns_no_current_stock():
         tools = {t.name: t.fn for t in wb_agent.build(wb, st).tools}
         assert "WB остаток не вернул" in await tools["fbs_stocks"]()
     run(go())
+
+
+def test_fbs_stocks_distinguishes_zero_from_no_record_and_describes_max_qty():
+    async def go():
+        api, wb, _, st = stage2()
+        del api.fbs[1001]                      # у A-1 записи нет, у B-2 есть (5 и 7)
+        agent = wb_agent.build(wb, st)
+        tools = {t.name: t.fn for t in agent.tools}
+        out = await tools["fbs_stocks"](max_qty=5)
+        assert "A-1 «Щит 1»: нет записи об остатке" in out and "B-2" in out and "по 1 из 3 позиций WB остаток не вернул" in out
+        desc = next(t.description for t in agent.tools if t.name == "fbs_stocks")
+        assert "max_qty=5" in desc and "а не top" in desc
+    run(go())
