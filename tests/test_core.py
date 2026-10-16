@@ -1143,3 +1143,23 @@ def test_resolve_by_name_part_and_disambiguates():
         resolve(catalog, [{"article": "Мебельный щит сорт АВ", "amount": 1}])
     with pytest.raises(ProposalError, match="не найден ни по артикулу, ни по названию"):
         resolve(catalog, [{"article": "несуществующий", "amount": 1}])
+
+
+def test_agent_does_not_ask_for_article_when_name_was_given():
+    from app.wb_agent import build as build_wb
+    api, wb, _, st = stage2()
+    llm = FakeLLM([
+        '{"final": "Укажите, пожалуйста, артикул (или nm) товара и ID склада."}',       # спросила вместо действия
+        '{"tool": "propose_stock_update", "args": {"items": [{"article": "Щит 1", "amount": 5}]}}',
+        '{"final": "Предложение создано, ждёт ✅"}',
+    ])
+    agent = build_wb(wb, st)
+    out = run(run_agent(llm, agent, "Дословная просьба владельца: «измени остаток у Щит 1 на 5 штук»"))
+    assert out == "Предложение создано, ждёт ✅" and len(st.new_ids) == 1
+    assert "Не проси артикул" in llm.seen[1][-1]["content"]
+
+
+def test_no_id_nudge_for_read_only_requests():
+    from app.wb_agent import verify_stock
+    assert verify_stock("Укажите артикул, пожалуйста.", set(), "покажи остатки на складе не больше 5") is None
+    assert verify_stock("Укажите артикул, пожалуйста.", set(), "измени остаток у Щит 1 на 5") is not None

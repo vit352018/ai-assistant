@@ -26,15 +26,25 @@ PROMPT = """Ты — WB-агент: аналитик магазина на Wildb
 CLAIM_STOCK = re.compile(r"предложени\w*\s+(?:уже\s+)?(?:подготовлен|создан|отправлен|показан|готов)"
                          r"|подготовил\w*\s+предложени|ожида\w*\s+подтверждени|нажмите\s*✅|с\s+кнопк", re.I)
 ASKS = re.compile(r"\?|уточн|укажит", re.I)  # вопрос владельцу — не заявление о сделанном
+CHANGE_INTENT = re.compile(r"измени|установи|поставь|выстав|обнули|сделай\s+остаток", re.I)
+ASKS_ID = re.compile(r"артикул|\bnm\b|warehouse|id\s+склад|какой\s+товар|уточн|укажит", re.I)
+ASK_NUDGE = ('Владелец уже назвал товар (название или часть артикула). Не проси артикул и nm: передай то, что он написал, '
+             'в поле article и вызови propose_stock_update сейчас, одной строкой JSON: '
+             '{"tool": "propose_stock_update", "args": {"items": [{"article": "<название как написал владелец>", "amount": N}]}}. '
+             'Склад спрашивай только если propose_stock_update сам вернул ошибку о нескольких складах.')
 STOCK_NUDGE = ('Ты написал о подготовленном предложении, но инструмент propose_stock_update НЕ вызывался — '
                'предложения нет, кнопок нет. Вызови его сейчас, одной строкой JSON, с артикулом и новым количеством '
                'из запроса владельца: {"tool": "propose_stock_update", "args": {"items": [{"article": "...", "amount": N}]}}. '
                'Не пиши ничего, кроме этого JSON.')
 
 
-def verify_stock(answer, called):
-    if CLAIM_STOCK.search(answer or "") and not ASKS.search(answer or "") and "propose_stock_update" not in called:
+def verify_stock(answer, called, task=""):
+    if "propose_stock_update" in called:
+        return None
+    if CLAIM_STOCK.search(answer or "") and not ASKS.search(answer or ""):
         return STOCK_NUDGE
+    if CHANGE_INTENT.search(task or "") and ASKS_ID.search(answer or ""):
+        return ASK_NUDGE  # просят артикул/склад вместо того, чтобы предложить изменение
     return None
 
 
@@ -166,7 +176,7 @@ def build(wb: WB, store=None) -> Agent:
         Tool("cards", "карточки товаров (название, бренд, категория). Аргументы: search='текст' (необязательно), top=число", cards),
         Tool("fbs_warehouses", "склады продавца (FBS): номер и название", fbs_warehouses),
         Tool("fbs_stocks", "текущие остатки на складе продавца (FBS) по всем товарам. Аргументы: max_qty=число — оставить только товары с остатком НЕ БОЛЬШЕ этого числа (фраза «не больше 5 штук» = max_qty=5, а не top); top=сколько строк на страницу (по умолчанию 40); offset=с какой позиции показать (для следующей страницы, см. строку «Это не всё»); warehouse_id (если складов несколько)", fbs_stocks),
-        Tool("propose_stock_update", "ПРЕДЛОЖИТЬ изменение остатков FBS (ничего не меняет, ждёт подтверждения владельца). Аргументы: items=[{\"article\": \"артикул\", \"amount\": новое количество}] (до 50 товаров; вместо article можно nm; size, если у товара несколько размеров), warehouse_id (если складов несколько)", propose),
+        Tool("propose_stock_update", "ПРЕДЛОЖИТЬ изменение остатков FBS (ничего не меняет, ждёт подтверждения владельца). Аргументы: items=[{\"article\": \"артикул ИЛИ название, как назвал владелец\", \"amount\": новое количество}] (до 50 товаров; вместо article можно nm; size, если у товара несколько размеров), warehouse_id (если складов несколько)", propose),
         Tool("feedbacks", "последние отзывы покупателей без ответа. Аргумент: top=число (по умолчанию 10)", feedbacks),
     ]
     return Agent("wb", "Wildberries: остатки и склад FBS (в том числе изменение остатков — через подтверждение владельца), "

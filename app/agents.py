@@ -77,7 +77,7 @@ async def run_agent(llm, agent, task, max_steps=None):
         data = extract_json(reply)
         if not data or "tool" not in data:
             answer = _final(data, reply)
-            nudge = agent.verify(answer, called) if agent.verify and not nudged else None
+            nudge = agent.verify(answer, called, task) if agent.verify and not nudged else None
             if nudge:  # модель заявила о действии, которого не было — один раз просим сделать его по-настоящему
                 nudged = True
                 msgs.append({"role": "assistant", "content": reply})
