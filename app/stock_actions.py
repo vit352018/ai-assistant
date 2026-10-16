@@ -29,6 +29,19 @@ def _amount(value):
     return int(f)
 
 
+def fuzzy_find(catalog, query):
+    """Товары, у которых в артикуле или названии есть строка запроса (без учёта регистра и пробелов)."""
+    q = _norm(query)
+    if not q:
+        return []
+    exact = [nm for nm, c in catalog.items() if _norm(c.get("vendorCode", "")) == q]
+    if exact:
+        return exact
+    hits = [nm for nm, c in catalog.items()
+            if q in _norm(c.get("vendorCode", "")) or q in _norm(c.get("title", ""))]
+    return hits
+
+
 def resolve(catalog, items):
     """[{article | nm, amount, size?}] -> [{chrtId, nm, label, amount}]; ошибки говорят, что именно не так."""
     by_art = {}
@@ -43,8 +56,13 @@ def resolve(catalog, items):
         art, nm = it.get("article") or it.get("vendorCode"), it.get("nm") or it.get("nmId") or it.get("nmID")
         if nm is None and art is not None:
             found = by_art.get(_norm(art), [])
+            if not found:  # владелец назвал товар не артикулом, а названием или его частью
+                found = fuzzy_find(catalog, art)
             if len(found) != 1:
-                raise ProposalError(f"артикул «{art}» " + ("не найден в каталоге" if not found else "встречается несколько раз"))
+                if not found:
+                    raise ProposalError(f"товар «{art}» не найден ни по артикулу, ни по названию; назовите артикул (article) или nm")
+                opts = "; ".join(f"{catalog[n]['vendorCode']} (nm {n})" for n in found[:5])
+                raise ProposalError(f"под «{art}» подходит несколько товаров: {opts}. Уточните артикул или nm")
             nm = found[0]
         try:
             nm = int(nm)

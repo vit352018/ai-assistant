@@ -806,7 +806,7 @@ def test_propose_validation_errors():
         return str(e.value)
 
     async def go():
-        assert "не найден в каталоге" in await bad([{"article": "НЕТ", "amount": 1}])
+        assert "не найден ни по артикулу, ни по названию" in await bad([{"article": "НЕТ", "amount": 1}])
         for wrong in (-1, True, 2.5, "много", None, 10**9):
             assert "не подходит" in await bad([{"article": "A-1", "amount": wrong}]), wrong
         assert "размеры: S, M" in await bad([{"article": "B-2", "amount": 1}])
@@ -1122,3 +1122,24 @@ def test_fbs_stocks_tool_reports_next_offset_and_honours_it():
         assert "Показаны позиции 2–2 из 2" in second and "Это не всё" not in second
         assert "увеличить" not in first and "увеличить" not in second
     run(go())
+
+
+def test_resolve_by_name_part_and_disambiguates():
+    from app.stock_actions import resolve, ProposalError
+    catalog = {
+        1: {"vendorCode": "брусок 2*5*100 3 шт", "title": "Брусок деревянный 20*50*1000 мм комплект 3 шт", "sizes": [{"chrtId": 11, "techSize": "0"}]},
+        2: {"vendorCode": "1018-300-1000E", "title": "Мебельный щит экстра", "sizes": [{"chrtId": 22, "techSize": "0"}]},
+        3: {"vendorCode": "Щит АВ 1", "title": "Мебельный щит сорт АВ", "sizes": [{"chrtId": 33, "techSize": "0"}]},
+        4: {"vendorCode": "Щит АВ 2", "title": "Мебельный щит сорт АВ", "sizes": [{"chrtId": 44, "techSize": "0"}]},
+    }
+    # по части артикула (как называл владелец)
+    assert resolve(catalog, [{"article": "брусок 2*5*100", "amount": 6}])[0]["nm"] == 1
+    # по названию
+    assert resolve(catalog, [{"article": "Брусок деревянный 20*50*1000", "amount": 6}])[0]["nm"] == 1
+    # точный артикул по-прежнему главный
+    assert resolve(catalog, [{"article": "1018-300-1000E", "amount": 1}])[0]["nm"] == 2
+    # несколько подходящих — не угадываем
+    with pytest.raises(ProposalError, match="несколько товаров"):
+        resolve(catalog, [{"article": "Мебельный щит сорт АВ", "amount": 1}])
+    with pytest.raises(ProposalError, match="не найден ни по артикулу, ни по названию"):
+        resolve(catalog, [{"article": "несуществующий", "amount": 1}])
