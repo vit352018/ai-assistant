@@ -1163,3 +1163,11 @@ def test_no_id_nudge_for_read_only_requests():
     from app.wb_agent import verify_stock
     assert verify_stock("Укажите артикул, пожалуйста.", set(), "покажи остатки на складе не больше 5") is None
     assert verify_stock("Укажите артикул, пожалуйста.", set(), "измени остаток у Щит 1 на 5") is not None
+
+
+def test_name_passed_in_nm_field_is_treated_as_name():
+    from app.stock_actions import resolve
+    catalog = {1: {"vendorCode": "брусок 2*5*100 3 шт", "title": "Брусок деревянный", "sizes": [{"chrtId": 11, "techSize": "0"}]}}
+    assert resolve(catalog, [{"nm": "брусок 2 5 100", "amount": 5}])[0]["nm"] == 1
+    assert resolve(catalog, [{"nm": "брусок 2*5*100", "amount": 5}])[0]["nm"] == 1
+    assert resolve(catalog, [{"nm": 1, "amount": 5}])[0]["nm"] == 1

@@ -2,6 +2,7 @@
   propose_stock_update — только готовит предложение (читает данные токеном на чтение, ничего не меняет);
   execute_stock_update — выполняет его токеном на запись, и только после подтверждения владельца кнопкой."""
 import asyncio
+import re
 
 KIND = "wb_stock_update"
 MAX_ITEMS = 50
@@ -29,17 +30,21 @@ def _amount(value):
     return int(f)
 
 
+def _plain(s):
+    """Только буквы и цифры, по одному пробелу: «брусок 2*5*100» и «брусок 2 5 100» совпадают."""
+    return " ".join(re.sub(r"[^0-9a-zа-яё]+", " ", str(s).lower()).split())
+
+
 def fuzzy_find(catalog, query):
-    """Товары, у которых в артикуле или названии есть строка запроса (без учёта регистра и пробелов)."""
-    q = _norm(query)
+    """Товары, у которых в артикуле или названии есть строка запроса (без учёта регистра и знаков)."""
+    q = _plain(query)
     if not q:
         return []
-    exact = [nm for nm, c in catalog.items() if _norm(c.get("vendorCode", "")) == q]
+    exact = [nm for nm, c in catalog.items() if _plain(c.get("vendorCode", "")) == q]
     if exact:
         return exact
-    hits = [nm for nm, c in catalog.items()
-            if q in _norm(c.get("vendorCode", "")) or q in _norm(c.get("title", ""))]
-    return hits
+    return [nm for nm, c in catalog.items()
+            if q in _plain(c.get("vendorCode", "")) or q in _plain(c.get("title", ""))]
 
 
 def resolve(catalog, items):
@@ -54,6 +59,8 @@ def resolve(catalog, items):
             raise ProposalError("каждый элемент списка должен быть объектом {article, amount}")
         amount = _amount(it.get("amount"))
         art, nm = it.get("article") or it.get("vendorCode"), it.get("nm") or it.get("nmId") or it.get("nmID")
+        if nm is not None and not str(nm).strip().lstrip("-").isdigit():  # название положили в поле nm — это название
+            art, nm = (art or str(nm)), None
         if nm is None and art is not None:
             found = by_art.get(_norm(art), [])
             if not found:  # владелец назвал товар не артикулом, а названием или его частью
