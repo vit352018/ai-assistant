@@ -1080,3 +1080,20 @@ def test_question_about_proposal_is_not_nudged_and_agent_sees_literal_request():
 def test_prompt_separates_reading_from_changing():
     from app.wb_agent import PROMPT
     assert "это ЧТЕНИЕ: вызови fbs_stocks" in PROMPT and "max_qty=N" in PROMPT and "«установи" in PROMPT
+
+
+def test_fbs_summary_counts_zero_low_and_unknown_separately():
+    async def go():
+        api, wb, _, st = stage2()
+        api.fbs.update({1001: 0, 2001: 3, 2002: 0})
+        del api.fbs[2002]  # 2002 — без записи
+        tools = {t.name: t.fn for t in wb_agent.build(wb, st).tools}
+        out = await tools["fbs_stocks"](max_qty=5)
+        assert "ровно 0 шт: 1" in out and "от 1 шт: 1" in out and "нет записи об остатке (это НЕ ноль" in out and "Цифры и выводы бери только отсюда" in out
+        assert "считаю 0" not in out
+    run(go())
+
+
+def test_prompt_forbids_inventing_summaries():
+    from app.wb_agent import PROMPT
+    assert "ТОЛЬКО из строки-итога" in PROMPT and "«Нет записи об остатке» — не ноль" in PROMPT
