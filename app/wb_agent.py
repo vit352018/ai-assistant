@@ -20,7 +20,7 @@ PROMPT = """Ты — WB-агент: аналитик магазина на Wildb
 - После вызова propose_stock_update скажи, что предложение показано с кнопками и ПОКА НИЧЕГО НЕ ИЗМЕНЕНО. Никогда не пиши, что остатки уже изменены.
 - Цены, скидки и карточки пока менять нельзя — скажи об этом, если попросят.
 Для анализа: сначала получи данные, затем дай выводы: что важно, что заканчивается, что падает или растёт. Если данных не хватает — скажи, чего именно.
-Числа (сколько с нулём, сколько с остатком, сколько без записи) бери ТОЛЬКО из строки-итога инструмента. Не делай выводов «все позиции с нулём», если инструмент этого не написал. «Нет записи об остатке» — не ноль, так и пиши. Всегда называй общее число найденных позиций из ответа инструмента; если инструмент сообщил, что часть товаров не показана, скажи об этом и предложи показать остальные."""
+Числа (сколько с нулём, сколько с остатком, сколько без записи) бери ТОЛЬКО из строки-итога инструмента. Если в ответе есть строка «Это не всё» — не говори владельцу «увеличьте top или max_qty»: вызови следующую страницу с offset из этой строки. Не делай выводов «все позиции с нулём», если инструмент этого не написал. «Нет записи об остатке» — не ноль, так и пиши. Всегда называй общее число найденных позиций из ответа инструмента; если инструмент сообщил, что часть товаров не показана, скажи об этом и предложи показать остальные."""
 
 
 CLAIM_STOCK = re.compile(r"предложени\w*\s+(?:уже\s+)?(?:подготовлен|создан|отправлен|показан|готов)"
@@ -36,6 +36,18 @@ def verify_stock(answer, called):
     if CLAIM_STOCK.search(answer or "") and not ASKS.search(answer or "") and "propose_stock_update" not in called:
         return STOCK_NUDGE
     return None
+
+
+def stock_page(lines, offset=0, top=40, cap=3800):
+    """Страница строк: не больше top штук и не больше cap символов. Возвращает (строки, следующий offset или None)."""
+    out, used, i = [], 0, offset
+    while i < len(lines) and len(out) < top:
+        if used + len(lines[i]) > cap and out:
+            break
+        out.append(lines[i])
+        used += len(lines[i]) + 1
+        i += 1
+    return out, (i if i < len(lines) else None)
 
 
 def build(wb: WB, store=None) -> Agent:
@@ -101,7 +113,7 @@ def build(wb: WB, store=None) -> Agent:
         whs = await wb.warehouses()
         return "\n".join(f"{w.get('id')}: {w.get('name')}" for w in whs) or "Складов продавца нет."
 
-    async def fbs_stocks(top=None, max_qty=None, warehouse_id=None):
+    async def fbs_stocks(top=None, max_qty=None, warehouse_id=None, offset=0):
         catalog = await wb.catalog()
         wh = await pick_warehouse(wb, warehouse_id)
         by_chrt = {sz["chrtId"]: (nm, c) for nm, c in catalog.items() for sz in c.get("sizes", [])}
@@ -118,15 +130,18 @@ def build(wb: WB, store=None) -> Agent:
         head = (f"Склад «{wh.get('name')}» (id {wh['id']}). Всего позиций: {len(by_chrt)}. Подходит под фильтр: {len(rows)} — "
                 f"ровно 0 шт: {zero}; от 1 шт: {low}; нет записи об остатке (это НЕ ноль, остаток неизвестен): {nodata}. "
                 f"Цифры и выводы бери только отсюда.")
-        lines, used = [head], 0
-        for n, (qty, nm, c, present) in enumerate(rows[:top]):
-            line = f"{' '.join(c['vendorCode'].split())} «{' '.join(c['title'].split())[:45]}»: " + (f"{qty} шт" if present else "нет записи об остатке")
-            if used + len(line) > 4200:
-                lines.append(f"…ещё {min(len(rows), top) - n} позиций не показано (уточните max_qty или top)")
-                break
-            lines.append(line)
-            used += len(line)
-        return "\n".join(lines)
+        body = [f"{' '.join(c['vendorCode'].split())} «{' '.join(c['title'].split())[:45]}»: "
+                + (f"{qty} шт" if present else "нет записи об остатке")
+                for qty, nm, c, present in rows]
+        offset = max(0, int(offset or 0))
+        page, nxt = stock_page(body, offset, int(top or (40 if limit is not None else 30)))
+        out = [head]
+        if body:
+            out.append(f"Показаны позиции {offset + 1}–{offset + len(page)} из {len(body)}.")
+        out += page
+        if nxt is not None:
+            out.append(f"Это не всё. Следующая страница: fbs_stocks с offset={nxt} (с теми же max_qty и top).")
+        return "\n".join(out)
 
     async def propose(items=None, warehouse_id=None):
         if store is None:
@@ -150,7 +165,7 @@ def build(wb: WB, store=None) -> Agent:
         Tool("prices", "текущие цены и скидки. Аргументы: search='часть артикула' (необязательно), top=число строк", prices),
         Tool("cards", "карточки товаров (название, бренд, категория). Аргументы: search='текст' (необязательно), top=число", cards),
         Tool("fbs_warehouses", "склады продавца (FBS): номер и название", fbs_warehouses),
-        Tool("fbs_stocks", "текущие остатки на складе продавца (FBS) по всем товарам. Аргументы: max_qty=число — оставить только товары с остатком НЕ БОЛЬШЕ этого числа (фраза «не больше 5 штук» = max_qty=5, а не top); top=сколько строк показать (по умолчанию 30, а при max_qty — 100); warehouse_id (если складов несколько)", fbs_stocks),
+        Tool("fbs_stocks", "текущие остатки на складе продавца (FBS) по всем товарам. Аргументы: max_qty=число — оставить только товары с остатком НЕ БОЛЬШЕ этого числа (фраза «не больше 5 штук» = max_qty=5, а не top); top=сколько строк на страницу (по умолчанию 40); offset=с какой позиции показать (для следующей страницы, см. строку «Это не всё»); warehouse_id (если складов несколько)", fbs_stocks),
         Tool("propose_stock_update", "ПРЕДЛОЖИТЬ изменение остатков FBS (ничего не меняет, ждёт подтверждения владельца). Аргументы: items=[{\"article\": \"артикул\", \"amount\": новое количество}] (до 50 товаров; вместо article можно nm; size, если у товара несколько размеров), warehouse_id (если складов несколько)", propose),
         Tool("feedbacks", "последние отзывы покупателей без ответа. Аргумент: top=число (по умолчанию 10)", feedbacks),
     ]

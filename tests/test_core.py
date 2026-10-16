@@ -1097,3 +1097,28 @@ def test_fbs_summary_counts_zero_low_and_unknown_separately():
 def test_prompt_forbids_inventing_summaries():
     from app.wb_agent import PROMPT
     assert "ТОЛЬКО из строки-итога" in PROMPT and "«Нет записи об остатке» — не ноль" in PROMPT
+
+
+def test_stock_pages_cover_everything_without_gaps():
+    from app.wb_agent import stock_page
+    lines = [f"товар {i}: {i % 6} шт — " + "описание " * 5 for i in range(74)]
+    p1, n1 = stock_page(lines, 0, top=40, cap=3800)
+    assert len(p1) == 40 and n1 == 40 and p1[0] == lines[0]
+    p2, n2 = stock_page(lines, n1, top=40, cap=3800)
+    assert p2 == lines[40:74] and n2 is None
+    seen = p1 + p2
+    assert seen == lines  # ни одна позиция не потеряна и не повторена
+    tight, nt = stock_page(lines, 0, top=40, cap=300)  # ограничение длины тоже даёт продолжение
+    assert tight and nt == len(tight) and tight == lines[:nt]
+
+
+def test_fbs_stocks_tool_reports_next_offset_and_honours_it():
+    async def go():
+        api, wb, _, st = stage2()
+        tools = {t.name: t.fn for t in wb_agent.build(wb, st).tools}
+        first = await tools["fbs_stocks"](max_qty=5, top=1)
+        assert "Показаны позиции 1–1 из 2" in first and "offset=1" in first
+        second = await tools["fbs_stocks"](max_qty=5, top=1, offset=1)
+        assert "Показаны позиции 2–2 из 2" in second and "Это не всё" not in second
+        assert "увеличить" not in first and "увеличить" not in second
+    run(go())
