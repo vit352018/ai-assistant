@@ -1226,3 +1226,23 @@ def test_ads_agent_has_no_write_tools():
     names = {t.name for t in build_ads(adsmod.AdsClient(None, "ADS")).tools}
     assert names == {"campaigns", "budget", "stats", "account"}
     assert not any(hasattr(adsmod.AdsClient, n) for n in ("start", "stop", "pause", "set_bid", "set_budget", "create"))
+
+
+def test_campaign_list_pages_and_counts_are_honest():
+    import json as _j
+    rows = [{"id": i, "status": 7 if i < 43 else 11, "settings": {"name": f"К{i}"}, "bid_type": "unified"} for i in range(53)]
+
+    def handler(req):
+        return httpx.Response(200, json={"adverts": rows})
+
+    async def go():
+        ads_c = adsmod.AdsClient(httpx.AsyncClient(transport=httpx.MockTransport(handler)), "ADS")
+        tools = {t.name: t.fn for t in build_ads(ads_c).tools}
+        p1 = await tools["campaigns"]()
+        assert "Всего кампаний: 53. По статусам: завершена — 43, на паузе — 10" in p1
+        assert "Показаны 1–40 из 53" in p1 and "offset=40" in p1
+        p2 = await tools["campaigns"](offset=40)
+        assert "Показаны 41–53 из 53" in p2 and "Это не все" not in p2
+        only_paused = await tools["campaigns"](status=11)
+        assert "Всего кампаний: 10" in only_paused and "активна" not in only_paused
+    run(go())
