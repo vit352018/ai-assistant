@@ -1171,3 +1171,58 @@ def test_name_passed_in_nm_field_is_treated_as_name():
     assert resolve(catalog, [{"nm": "брусок 2 5 100", "amount": 5}])[0]["nm"] == 1
     assert resolve(catalog, [{"nm": "брусок 2*5*100", "amount": 5}])[0]["nm"] == 1
     assert resolve(catalog, [{"nm": 1, "amount": 5}])[0]["nm"] == 1
+
+
+# ---------- реклама: лимиты и чтение ----------
+from app import ads as adsmod  # noqa: E402
+from app.ads_agent import build as build_ads  # noqa: E402
+
+
+def test_ad_limits():
+    assert adsmod.check_bid_change(100, 110) is None           # +10% — в пределах
+    assert adsmod.check_bid_change(100, 111) is not None       # +11% — больше лимита
+    assert adsmod.check_bid_change(100, 80) is None            # -20% — в пределах
+    assert adsmod.check_bid_change(100, 79) is not None        # -21% — больше лимита
+    assert adsmod.check_bid_change(None, 50) is not None and adsmod.check_bid_change(100, 0) is not None
+    assert adsmod.check_budget(0, 1000, others_total=2000) is None           # 3000 ровно — можно
+    assert "общего лимита" in adsmod.check_budget(0, 1000, others_total=2001)
+    assert "на кампанию" in adsmod.check_budget(0, 1001, others_total=0)
+    assert adsmod.check_budget(0, -5, others_total=0) is not None
+
+
+def test_stats_summary_is_honest_when_empty():
+    assert "статистики по кампаниям нет" in adsmod.summarize_stats([])
+    out = adsmod.summarize_stats([{"views": 100, "clicks": 5, "orders": 1, "sum": 250.4},
+                                  {"views": 50, "clicks": 5, "orders": 0, "sum": 100}])
+    assert "Кампаний со статистикой: 2" in out and "Показы: 150" in out and "расход: 350 ₽" in out
+
+
+def test_ads_client_reads_and_maps_errors():
+    def handler(req):
+        p = req.url.path
+        assert req.method == "GET"  # только чтение
+        assert req.headers["authorization"] == "ADS"
+        if p == "/api/advert/v2/adverts":
+            return httpx.Response(200, json={"adverts": [{"id": 1, "status": 9, "bid_type": "unified",
+                                                          "settings": {"name": "Кампания А"}}]})
+        if p == "/adv/v1/budget":
+            return httpx.Response(200, json={"total": 500, "currency": "RUB"})
+        if p == "/adv/v3/fullstats":
+            return httpx.Response(200, json=[])
+        return httpx.Response(403)
+
+    async def go():
+        a = adsmod.AdsClient(httpx.AsyncClient(transport=httpx.MockTransport(handler)), "ADS")
+        cs = await a.campaigns()
+        assert cs == [{"id": 1, "status": 9, "name": "Кампания А", "bid_type": "unified"}]
+        assert await a.budget(1) == 500
+        assert await a.stats([1]) == []
+        with pytest.raises(adsmod.AdsError, match="403"):
+            await a.get("/adv/v1/balance")
+    run(go())
+
+
+def test_ads_agent_has_no_write_tools():
+    names = {t.name for t in build_ads(adsmod.AdsClient(None, "ADS")).tools}
+    assert names == {"campaigns", "budget", "stats", "account"}
+    assert not any(hasattr(adsmod.AdsClient, n) for n in ("start", "stop", "pause", "set_bid", "set_budget", "create"))

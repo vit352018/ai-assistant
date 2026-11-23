@@ -11,6 +11,8 @@ from .actions import ActionStore
 from .config import load
 from .jsonutil import split_message
 from .llm import LLMError, LLMRouter, Provider
+from .ads import AdsClient
+from .ads_agent import build as build_ads_agent
 from .browser import Browser
 from .browser_agent import build as build_browser_agent
 from .orchestrator import Orchestrator
@@ -42,6 +44,8 @@ async def post_init(app):
     store = ActionStore(os.path.join(cfg.data_dir, "actions.db"))
     writer = WBWriter(client, cfg.wb_write_token) if cfg.wb_write_token else None  # без токена записи изменений нет
     agents, browser = [build_wb_agent(wb, store if writer else None)], None
+    if cfg.wb_ads_token:
+        agents.append(build_ads_agent(AdsClient(client, cfg.wb_ads_token)))
     if cfg.browser_enabled:
         browser = Browser()
         agents.append(build_browser_agent(browser))

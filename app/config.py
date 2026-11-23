@@ -19,6 +19,7 @@ class Config:
     cf_models: tuple
     tts_voice: str
     browser_enabled: bool = True
+    wb_ads_token: str = ""  # токен рекламы: только чтение пока
     wb_write_token: str = ""  # токен WB с правом записи: только для исполнителя подтверждённых действий
     data_dir: str = "/opt/assistant/data"
     cohere_key: str = ""
@@ -52,6 +53,7 @@ def load():
         tts_voice=os.environ.get("TTS_VOICE", "ru-RU-DmitryNeural").strip(),
         browser_enabled=os.environ.get("BROWSER", "1").strip() != "0",
         wb_write_token=os.environ.get("WB_WRITE_TOKEN", "").strip(),
+        wb_ads_token=os.environ.get("WB_ADS_TOKEN", "").strip(),
         data_dir=os.environ.get("DATA_DIR", "/opt/assistant/data").strip(),
         cohere_key=os.environ.get("COHERE_API_KEY", "").strip(),
         mistral_key=os.environ.get("MISTRAL_API_KEY", "").strip(),
